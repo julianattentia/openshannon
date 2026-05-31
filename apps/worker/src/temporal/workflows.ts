@@ -248,8 +248,20 @@ export async function pentestPipeline(input: PipelineInput): Promise<PipelineSta
 
   const selectedVulnClasses: readonly VulnClass[] =
     input.vulnClasses && input.vulnClasses.length > 0 ? input.vulnClasses : ALL_VULN_CLASSES;
-  const selectedClassSet = new Set<VulnClass>(selectedVulnClasses);
   const exploit: boolean = input.exploit ?? true;
+
+  // For --only vuln:* modes: narrow to the single specified class and disable exploitation.
+  const effectiveVulnClasses: readonly VulnClass[] =
+    input.onlyPhase === 'vuln:auth'
+      ? (['auth'] as VulnClass[])
+      : input.onlyPhase === 'vuln:ssrf'
+        ? (['ssrf'] as VulnClass[])
+        : input.onlyPhase === 'vuln:document-processing'
+          ? (['authz'] as VulnClass[])
+          : selectedVulnClasses;
+  const effectiveClassSet = new Set<VulnClass>(effectiveVulnClasses);
+  const effectiveExploit = exploit && !input.onlyPhase?.startsWith('vuln:');
+
   const expectedAgents = computeExpectedAgents(selectedVulnClasses, exploit);
 
   await a.persistOrValidateRunScope(activityInput, [...selectedVulnClasses], exploit);
@@ -458,10 +470,44 @@ export async function pentestPipeline(input: PipelineInput): Promise<PipelineSta
     log.info(`Run scope: vuln_classes=[${selectedVulnClasses.join(', ')}] exploit=${exploit}`);
 
     // === Phase 1: Pre-Reconnaissance ===
-    await runSequentialPhase('pre-recon', 'pre-recon', a.runPreReconAgent);
+    // Skipped for --only recon and --only vuln:* (caller reuses prior deliverable via same workspace).
+    if (!input.onlyPhase || input.onlyPhase === 'pre-recon') {
+      await runSequentialPhase('pre-recon', 'pre-recon', a.runPreReconAgent);
+    } else {
+      log.info(
+        `Run scope: --only ${input.onlyPhase} — skipping pre-recon phase (prior deliverable assumed in workspace)`,
+      );
+    }
+
+    // === Run scope gate: --only pre-recon short-circuits here ===
+    if (input.onlyPhase === 'pre-recon') {
+      log.info('Run scope: --only pre-recon — skipping recon, vulnerability analysis, exploitation, and report phases');
+      state.status = 'completed';
+      state.currentPhase = null;
+      state.currentAgent = null;
+      state.summary = computeSummary(state);
+      await a.logWorkflowComplete(activityInput, toWorkflowSummary(state, 'completed'));
+      return state;
+    }
 
     // === Phase 2: Reconnaissance ===
-    await runSequentialPhase('recon', 'recon', a.runReconAgent);
+    // Skipped for --only vuln:* (caller reuses prior recon deliverable via same workspace).
+    if (!input.onlyPhase || input.onlyPhase === 'recon') {
+      await runSequentialPhase('recon', 'recon', a.runReconAgent);
+    } else {
+      log.info(`Run scope: --only ${input.onlyPhase} — skipping recon phase (prior deliverable assumed in workspace)`);
+    }
+
+    // === Run scope gate: --only recon short-circuits here ===
+    if (input.onlyPhase === 'recon') {
+      log.info('Run scope: --only recon — skipping vulnerability analysis, exploitation, and report phases');
+      state.status = 'completed';
+      state.currentPhase = null;
+      state.currentAgent = null;
+      state.summary = computeSummary(state);
+      await a.logWorkflowComplete(activityInput, toWorkflowSummary(state, 'completed'));
+      return state;
+    }
 
     // === Phases 3-4: Vulnerability Analysis + Exploitation (Pipelined) ===
     // Each vuln type runs as an independent pipeline:
@@ -505,7 +551,7 @@ export async function pentestPipeline(input: PipelineInput): Promise<PipelineSta
       if (shouldSkip(exploitAgentName)) {
         log.info(`Skipping ${exploitAgentName} (already complete)`);
         state.completedAgents.push(exploitAgentName);
-      } else if (decision.shouldExploit && exploit) {
+      } else if (decision.shouldExploit && effectiveExploit) {
         exploitMetrics = await runExploitAgent();
         state.agentMetrics[exploitAgentName] = exploitMetrics;
         state.completedAgents.push(exploitAgentName);
@@ -533,7 +579,7 @@ export async function pentestPipeline(input: PipelineInput): Promise<PipelineSta
 
     for (const config of pipelineConfigs) {
       // Excluded classes drop entirely; any prior deliverables stay on disk but don't count this run.
-      if (!selectedClassSet.has(config.vulnType)) {
+      if (!effectiveClassSet.has(config.vulnType)) {
         log.info(`Skipping ${config.vulnType} pipeline (class not selected this run)`);
         continue;
       }
@@ -551,6 +597,17 @@ export async function pentestPipeline(input: PipelineInput): Promise<PipelineSta
     state.currentPhase = 'exploitation';
     state.currentAgent = null;
     await a.logPhaseTransition(activityInput, 'vulnerability-exploitation', 'complete');
+
+    // === Run scope gate: --only vuln:* short-circuits before report ===
+    if (input.onlyPhase?.startsWith('vuln:')) {
+      log.info(`Run scope: --only ${input.onlyPhase} — skipping report phase`);
+      state.status = 'completed';
+      state.currentPhase = null;
+      state.currentAgent = null;
+      state.summary = computeSummary(state);
+      await a.logWorkflowComplete(activityInput, toWorkflowSummary(state, 'completed'));
+      return state;
+    }
 
     // === Phase 5: Reporting ===
     if (!shouldSkip('report')) {

@@ -24,6 +24,10 @@ export interface StartArgs {
   pipelineTesting: boolean;
   debug: boolean;
   version: string;
+  /** When true, all vuln agents run but exploit agents are skipped. */
+  noExploit?: boolean;
+  /** When set, the worker pipeline runs only this phase. */
+  onlyPhase?: 'pre-recon' | 'recon' | 'vuln:auth' | 'vuln:ssrf' | 'vuln:document-processing';
 }
 
 export async function start(args: StartArgs): Promise<void> {
@@ -113,6 +117,8 @@ export async function start(args: StartArgs): Promise<void> {
     workspace,
     ...(args.pipelineTesting && { pipelineTesting: true }),
     ...(args.debug && { debug: true }),
+    ...(args.noExploit && { noExploit: true }),
+    ...(args.onlyPhase && { onlyPhase: args.onlyPhase }),
   });
 
   // 14. Bail if `docker run -d` itself fails (mount error, image missing, etc.)
