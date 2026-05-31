@@ -28,6 +28,7 @@ import net, { type LookupFunction } from 'node:net';
 import type { SDKAssistantMessageError } from '@anthropic-ai/claude-agent-sdk';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { glob } from 'zx';
+import { resolveExecutorId } from '../ai/executor/select.js';
 import { resolveModel } from '../ai/models.js';
 import { parseConfig } from '../config-parser.js';
 import type { ActivityLogger } from '../types/activity-logger.js';
@@ -634,10 +635,17 @@ export async function runPreflightChecks(
     }
   }
 
-  // 4. Credential check (cheap — 1 SDK round-trip, skipped when providerConfig present)
-  const credResult = await validateCredentials(logger, apiKey, providerConfig);
-  if (!credResult.ok) {
-    return credResult;
+  // 4. Credential check (cheap — 1 SDK round-trip).
+  // Skipped when providerConfig is present (Bedrock/Vertex managed externally).
+  // Skipped when the resolved executor is Hermes — Hermes manages its own credentials.
+  const resolvedExecutor = resolveExecutorId();
+  if (resolvedExecutor === 'hermes') {
+    logger.info('Hermes executor — skipping Claude credential validation');
+  } else {
+    const credResult = await validateCredentials(logger, apiKey, providerConfig);
+    if (!credResult.ok) {
+      return credResult;
+    }
   }
 
   // 5. Target URL reachability check (cheap — 1 HTTP round-trip)
