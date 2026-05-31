@@ -89,6 +89,11 @@ Options for 'start':
   -w, --workspace <name>    Named workspace (auto-resumes if exists)
       --pipeline-testing    Use minimal prompts for fast testing
       --debug               Preserve worker container after exit for log inspection
+      --only <phase>        Run only this pipeline phase.
+                            Supported: pre-recon, recon, vuln:auth, vuln:ssrf, vuln:document-processing.
+                            Aliases: pre_recon (→ pre-recon), auth / vuln:auth-session / auth-session (→ vuln:auth), ssrf / vuln:ssrf-config / ssrf-config / config-ssrf (→ vuln:ssrf), documents / document-processing / file-upload / upload / phi-artifacts (→ vuln:document-processing).
+                            Required for staged staging trials (see HERMES_EXECUTOR.md).
+      --no-exploit          Run all vuln agents but skip all exploit agents (default: exploit agents run if vuln queue is non-empty).
 
 Examples:
   ${prefix} start -u https://example.com -r ${mode === 'local' ? 'my-repo' : './my-repo'}
@@ -106,6 +111,41 @@ Monitor workflows at http://localhost:8233
 `);
 }
 
+/** Normalized phase identifier the worker pipeline understands. */
+export type OnlyPhase = 'pre-recon' | 'recon' | 'vuln:auth' | 'vuln:ssrf' | 'vuln:document-processing';
+
+/** Normalize `--only <phase>` input. Accepts the documented aliases. Returns null for unknown values. */
+export function normalizeOnlyPhase(raw: string): OnlyPhase | null {
+  const norm = raw.trim().toLowerCase().replace(/_/g, '-');
+  if (norm === 'pre-recon' || norm === 'pre-recon-code') return 'pre-recon';
+  if (norm === 'recon') return 'recon';
+  if (norm === 'vuln:auth' || norm === 'auth' || norm === 'vuln:auth-session' || norm === 'auth-session')
+    return 'vuln:auth';
+  if (
+    norm === 'vuln:ssrf' ||
+    norm === 'ssrf' ||
+    norm === 'vuln:ssrf-config' ||
+    norm === 'ssrf-config' ||
+    norm === 'config-ssrf' ||
+    norm === 'vuln:config-ssrf'
+  )
+    return 'vuln:ssrf';
+  if (
+    norm === 'vuln:document-processing' ||
+    norm === 'vuln:documents' ||
+    norm === 'vuln:file-upload' ||
+    norm === 'vuln:upload' ||
+    norm === 'vuln:phi-artifacts' ||
+    norm === 'documents' ||
+    norm === 'document-processing' ||
+    norm === 'file-upload' ||
+    norm === 'upload' ||
+    norm === 'phi-artifacts'
+  )
+    return 'vuln:document-processing';
+  return null;
+}
+
 interface ParsedStartArgs {
   url: string;
   repo: string;
@@ -114,6 +154,8 @@ interface ParsedStartArgs {
   output?: string;
   pipelineTesting: boolean;
   debug: boolean;
+  noExploit: boolean;
+  onlyPhase?: OnlyPhase;
 }
 
 function parseStartArgs(argv: string[]): ParsedStartArgs {
@@ -124,6 +166,8 @@ function parseStartArgs(argv: string[]): ParsedStartArgs {
   let output: string | undefined;
   let pipelineTesting = false;
   let debug = false;
+  let noExploit = false;
+  let onlyPhase: OnlyPhase | undefined;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -171,6 +215,28 @@ function parseStartArgs(argv: string[]): ParsedStartArgs {
       case '--debug':
         debug = true;
         break;
+      case '--no-exploit':
+        noExploit = true;
+        break;
+      case '--only': {
+        if (!next || next.startsWith('-')) {
+          console.error(
+            'ERROR: --only requires a phase name. Supported: pre-recon, recon, vuln:auth, vuln:ssrf, vuln:document-processing.',
+          );
+          process.exit(1);
+        }
+        const normalized = normalizeOnlyPhase(next);
+        if (normalized === null) {
+          console.error(`ERROR: Unsupported --only value: ${next}.`);
+          console.error(
+            'Supported: pre-recon, recon, vuln:auth (alias: auth), vuln:ssrf (alias: ssrf), vuln:document-processing (alias: documents).',
+          );
+          process.exit(1);
+        }
+        onlyPhase = normalized;
+        i++;
+        break;
+      }
       default:
         console.error(`Unknown option: ${arg}`);
         console.error(`Run "${getMode() === 'local' ? './shannon' : 'npx @keygraph/shannon'} help" for usage`);
@@ -189,9 +255,11 @@ function parseStartArgs(argv: string[]): ParsedStartArgs {
     repo,
     pipelineTesting,
     debug,
+    noExploit,
     ...(config && { config }),
     ...(workspace && { workspace }),
     ...(output && { output }),
+    ...(onlyPhase && { onlyPhase }),
   };
 }
 

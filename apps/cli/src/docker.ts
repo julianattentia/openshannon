@@ -97,12 +97,55 @@ export async function ensureInfra(): Promise<void> {
  * Build the worker image locally (local mode only).
  */
 export function buildImage(noCache: boolean): void {
-  console.log(`Building ${DEV_IMAGE}...`);
+  const withHermes = isHermesExecutor();
+  console.log(`Building ${DEV_IMAGE}${withHermes ? ' (WITH_HERMES=1)' : ''}...`);
   const args = ['build'];
   if (noCache) args.push('--no-cache');
+  if (withHermes) args.push('--build-arg', 'WITH_HERMES=1');
   args.push('-t', DEV_IMAGE, '.');
   execFileSync('docker', args, { stdio: 'inherit' });
   console.log(`Build complete: ${DEV_IMAGE}`);
+}
+
+/** Resolve the executor as the worker would, mirroring `selectAgentExecutor`. Local CLI use only. */
+function isHermesExecutor(): boolean {
+  const raw = (process.env.SHANNON_EXECUTOR ?? '').trim().toLowerCase();
+  if (raw === '') return true; // Phase 10: Hermes is the default in this fork
+  return raw === 'hermes';
+}
+
+/**
+ * When Hermes is selected, verify the worker image actually contains the
+ * Hermes Python runtime. Without this, runs would silently fall through to a
+ * Claude-only image and the worker container would fail at executor.run() time
+ * with no clear cause. Exits with an actionable message if the runtime is
+ * missing.
+ */
+function preflightHermesImage(image: string): void {
+  if (!isHermesExecutor()) return;
+  const probe = runQuiet('docker', [
+    'run',
+    '--rm',
+    '--entrypoint=/bin/sh',
+    image,
+    '-c',
+    'test -x /opt/hermes/bin/python3',
+  ]);
+  if (probe) return;
+  console.error('');
+  console.error(
+    `ERROR: SHANNON_EXECUTOR is set to Hermes, but the worker image ${image} does not include the Hermes Python runtime.`,
+  );
+  console.error('');
+  console.error('Either:');
+  console.error(
+    `  • Rebuild the image with Hermes:        ./shannon build              (auto-detects SHANNON_EXECUTOR=hermes)`,
+  );
+  console.error(`  • Build with the explicit arg:          docker build --build-arg WITH_HERMES=1 -t ${image} .`);
+  console.error(`  • Or fall back to Claude for this run:  SHANNON_EXECUTOR=claude ./shannon start ...`);
+  console.error('');
+  console.error('See HERMES_EXECUTOR.md for the full runtime requirements.');
+  process.exit(1);
 }
 
 /**
@@ -112,23 +155,28 @@ export function buildImage(noCache: boolean): void {
 export function ensureImage(version: string): void {
   const image = getWorkerImage(version);
   const exists = runQuiet('docker', ['image', 'inspect', image]);
-  if (exists) return;
-
-  if (getMode() === 'local') {
-    console.log('Worker image not found, building...');
-    buildImage(false);
-  } else {
-    console.log(`Pulling ${image}...`);
-    try {
-      execFileSync('docker', ['pull', image], { stdio: 'inherit' });
-    } catch {
-      console.error(`\nERROR: Failed to pull ${image}`);
-      console.error('The image may not be available for your platform yet.');
-      console.error('Check https://hub.docker.com/r/keygraph/shannon for available tags.');
-      process.exit(1);
+  if (!exists) {
+    if (getMode() === 'local') {
+      console.log('Worker image not found, building...');
+      buildImage(false);
+    } else {
+      console.log(`Pulling ${image}...`);
+      try {
+        execFileSync('docker', ['pull', image], { stdio: 'inherit' });
+      } catch {
+        console.error(`\nERROR: Failed to pull ${image}`);
+        console.error('The image may not be available for your platform yet.');
+        console.error('Check https://hub.docker.com/r/keygraph/shannon for available tags.');
+        process.exit(1);
+      }
+      pruneOldImages(version);
     }
-    pruneOldImages(version);
   }
+
+  // After we know the image exists, verify it matches the selected executor.
+  // For Hermes, this catches the case where the image is the default Claude-only
+  // build and would fail mysteriously at runtime.
+  preflightHermesImage(image);
 }
 
 /**
@@ -160,6 +208,8 @@ export interface WorkerOptions {
   workspace: string;
   pipelineTesting?: boolean;
   debug?: boolean;
+  noExploit?: boolean;
+  onlyPhase?: 'pre-recon' | 'recon' | 'vuln:auth' | 'vuln:ssrf' | 'vuln:document-processing';
 }
 
 /**
@@ -232,6 +282,12 @@ export function spawnWorker(opts: WorkerOptions): ChildProcess {
   args.push('--workspace', opts.workspace);
   if (opts.pipelineTesting) {
     args.push('--pipeline-testing');
+  }
+  if (opts.noExploit) {
+    args.push('--no-exploit');
+  }
+  if (opts.onlyPhase) {
+    args.push('--only', opts.onlyPhase);
   }
 
   // Inherit stderr so `docker run` daemon errors surface to the user;

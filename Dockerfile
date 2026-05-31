@@ -115,6 +115,25 @@ RUN mkdir -p /app/sessions /app/repos /app/workspaces && \
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
+# === Optional Hermes executor runtime ===
+# Default builds remain Claude-only. Pass `--build-arg WITH_HERMES=1` to opt in.
+# When enabled this installs Python pip + a pinned `hermes-agent` into an
+# isolated `/opt/hermes` venv. The Hermes Python wrapper script is shipped
+# verbatim under `/app/apps/worker/src/ai/executor/hermes/wrapper.py` because
+# the `COPY --from=builder /app/apps/worker /app/apps/worker` step above
+# includes it regardless of the build flag.
+ARG WITH_HERMES=0
+ARG HERMES_AGENT_VERSION=0.14.0
+RUN if [ "$WITH_HERMES" = "1" ]; then \
+      set -eux; \
+      apk add --no-cache py3.12-pip; \
+      python3 -m venv /opt/hermes; \
+      /opt/hermes/bin/pip install --no-cache-dir --upgrade pip; \
+      /opt/hermes/bin/pip install --no-cache-dir "hermes-agent==${HERMES_AGENT_VERSION}"; \
+      mkdir -p /tmp/.hermes; \
+      chown -R pentest:pentest /opt/hermes /tmp/.hermes; \
+    fi
+
 # Set environment variables
 ENV NODE_ENV=production
 ENV PATH="/usr/local/bin:$PATH"
@@ -125,6 +144,12 @@ ENV npm_config_cache=/tmp/.npm
 ENV HOME=/tmp
 ENV XDG_CACHE_HOME=/tmp/.cache
 ENV XDG_CONFIG_HOME=/tmp/.config
+
+# Hermes runtime defaults. Harmless when WITH_HERMES=0 — the Node executor
+# only spawns the wrapper if `SHANNON_EXECUTOR=hermes` is set at runtime.
+ENV SHANNON_HERMES_PYTHON=/opt/hermes/bin/python3
+ENV SHANNON_HERMES_WRAPPER=/app/apps/worker/src/ai/executor/hermes/wrapper.py
+ENV HERMES_HOME=/tmp/.hermes
 
 ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["node", "apps/worker/dist/temporal/worker.js"]

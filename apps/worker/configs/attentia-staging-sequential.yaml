@@ -1,0 +1,4 @@
+exploit: "false"
+
+pipeline:
+  max_concurrent_pipelines: "1"

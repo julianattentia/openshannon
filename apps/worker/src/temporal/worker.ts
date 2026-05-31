@@ -56,7 +56,9 @@ interface CliArgs {
   configPath?: string;
   outputPath?: string;
   pipelineTestingMode: boolean;
+  noExploit: boolean;
   resumeFromWorkspace?: string;
+  onlyPhase?: 'pre-recon' | 'recon' | 'vuln:auth' | 'vuln:ssrf' | 'vuln:document-processing';
 }
 
 function showUsage(): void {
@@ -83,7 +85,9 @@ function parseCliArgs(argv: string[]): CliArgs {
   let configPath: string | undefined;
   let outputPath: string | undefined;
   let pipelineTestingMode = false;
+  let noExploit = false;
   let resumeFromWorkspace: string | undefined;
+  let onlyPhase: 'pre-recon' | 'recon' | 'vuln:auth' | 'vuln:ssrf' | 'vuln:document-processing' | undefined;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -113,6 +117,48 @@ function parseCliArgs(argv: string[]): CliArgs {
       }
     } else if (arg === '--pipeline-testing') {
       pipelineTestingMode = true;
+    } else if (arg === '--no-exploit') {
+      noExploit = true;
+    } else if (arg === '--only') {
+      const nextArg = argv[i + 1];
+      if (nextArg && !nextArg.startsWith('-')) {
+        const norm = nextArg.trim().toLowerCase().replace(/_/g, '-');
+        if (norm === 'pre-recon' || norm === 'pre-recon-code') {
+          onlyPhase = 'pre-recon';
+        } else if (norm === 'recon') {
+          onlyPhase = 'recon';
+        } else if (norm === 'vuln:auth' || norm === 'auth' || norm === 'vuln:auth-session' || norm === 'auth-session') {
+          onlyPhase = 'vuln:auth';
+        } else if (
+          norm === 'vuln:ssrf' ||
+          norm === 'ssrf' ||
+          norm === 'vuln:ssrf-config' ||
+          norm === 'ssrf-config' ||
+          norm === 'config-ssrf' ||
+          norm === 'vuln:config-ssrf'
+        ) {
+          onlyPhase = 'vuln:ssrf';
+        } else if (
+          norm === 'vuln:document-processing' ||
+          norm === 'vuln:documents' ||
+          norm === 'vuln:file-upload' ||
+          norm === 'vuln:upload' ||
+          norm === 'vuln:phi-artifacts' ||
+          norm === 'documents' ||
+          norm === 'document-processing' ||
+          norm === 'file-upload' ||
+          norm === 'upload' ||
+          norm === 'phi-artifacts'
+        ) {
+          onlyPhase = 'vuln:document-processing';
+        } else {
+          console.error(
+            `Error: Unsupported --only value: ${nextArg}. Supported: pre-recon, recon, vuln:auth (aliases: auth, vuln:auth-session, auth-session), vuln:ssrf (aliases: ssrf, vuln:ssrf-config, ssrf-config, config-ssrf), vuln:document-processing (aliases: documents, document-processing, file-upload, upload, phi-artifacts).`,
+          );
+          process.exit(1);
+        }
+        i++;
+      }
     } else if (arg && !arg.startsWith('-')) {
       if (!webUrl) {
         webUrl = arg;
@@ -139,9 +185,11 @@ function parseCliArgs(argv: string[]): CliArgs {
     repoPath,
     taskQueue,
     pipelineTestingMode,
+    noExploit,
     ...(configPath && { configPath }),
     ...(outputPath && { outputPath }),
     ...(resumeFromWorkspace && { resumeFromWorkspace }),
+    ...(onlyPhase && { onlyPhase }),
   };
 }
 
@@ -320,7 +368,9 @@ function buildPipelineInput(
     ...(workspace.terminatedWorkflows.length > 0 && { terminatedWorkflows: workspace.terminatedWorkflows }),
     ...(Object.keys(orchestration.pipelineConfig).length > 0 && { pipelineConfig: orchestration.pipelineConfig }),
     ...(orchestration.vulnClasses && { vulnClasses: orchestration.vulnClasses }),
-    ...(orchestration.exploit !== undefined && { exploit: orchestration.exploit }),
+    ...(args.noExploit && { exploit: false }),
+    ...(orchestration.exploit !== undefined && !args.noExploit && { exploit: orchestration.exploit }),
+    ...(args.onlyPhase && { onlyPhase: args.onlyPhase }),
   };
 }
 

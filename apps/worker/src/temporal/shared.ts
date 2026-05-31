@@ -31,6 +31,16 @@ export interface PipelineInput {
   providerConfig?: ProviderConfig; // LLM provider configuration (Bedrock, Vertex, etc.)
   vulnClasses?: VulnClass[]; // omitted = all five
   exploit?: boolean; // false skips the exploitation phase
+  /**
+   * Run scope selector. When set, the pipeline runs only the named phase
+   * and short-circuits to a completed state. Supported values:
+   *   - 'pre-recon' — pre-recon only; skips recon, vuln, exploit, report.
+   *   - 'recon'     — recon only (skips pre-recon; caller provides prior deliverable via same workspace).
+   *   - 'vuln:auth' — auth-vuln only; skips pre-recon, recon, all other vulns, exploit, report.
+   *   - 'vuln:ssrf' — ssrf-vuln only; skips pre-recon, recon, all other vulns, exploit, report.
+   *   - 'vuln:document-processing' — authz-vuln only; skips pre-recon, recon, all other vulns, exploit, report.
+   */
+  onlyPhase?: 'pre-recon' | 'recon' | 'vuln:auth' | 'vuln:ssrf' | 'vuln:document-processing';
 }
 
 export interface ResumeState {

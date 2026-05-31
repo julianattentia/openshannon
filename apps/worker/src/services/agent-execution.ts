@@ -12,7 +12,7 @@
  * - Load prompt template using AGENTS[agentName].promptTemplate
  * - Create git checkpoint
  * - Start audit logging
- * - Invoke Claude SDK via runClaudePrompt
+ * - Invoke executor (Claude) via the AgentExecutor boundary
  * - Spending cap check using isSpendingCapBehavior
  * - Handle failure (rollback, audit)
  * - Validate output using AGENTS[agentName].deliverableFilename
@@ -22,7 +22,10 @@
  */
 
 import { fs, path } from 'zx';
-import { type ClaudePromptResult, runClaudePrompt, validateAgentOutput } from '../ai/claude-executor.js';
+import { type ClaudePromptResult, validateAgentOutput } from '../ai/claude-executor.js';
+import { applyHermesPromptShim } from '../ai/executor/hermes/prompt-shim.js';
+import { selectAgentExecutor } from '../ai/executor/select.js';
+import { buildJsonOutputInstruction, extractStructuredOutput } from '../ai/executor/structured-output.js';
 import { getOutputFormat, getQueueFilename } from '../ai/queue-schemas.js';
 import type { AuditSession } from '../audit/index.js';
 import { AGENTS } from '../session-manager.js';
@@ -160,25 +163,66 @@ export class AgentExecutionService {
     // 4. Start audit logging
     await auditSession.startAgent(agentName, prompt, attemptNumber);
 
-    // 5. Execute agent
+    // 5. Execute agent via executor boundary. Selector picks Claude by default.
     const outputFormat = getOutputFormat(agentName, distributedConfig?.exploit ?? true);
-    const result: ClaudePromptResult = await runClaudePrompt(
-      prompt,
-      repoPath,
-      '', // context
-      agentName, // description
+    const executor = selectAgentExecutor({ logger });
+
+    // Build the prompt the executor will see. Order matters:
+    //   1. Hermes-only tool-name compatibility shim (no effect on Claude).
+    //   2. Structured-output JSON instruction (only when the executor
+    //      doesn't natively support schemas — i.e. Hermes).
+    // The JSON instruction is appended LAST so it remains the most recent
+    // instruction the model sees.
+    const needsCompatStructuredOutput = outputFormat !== undefined && !executor.supportsStructuredOutput;
+    let promptForExecutor = prompt;
+    if (executor.id === 'hermes') {
+      promptForExecutor = applyHermesPromptShim(promptForExecutor, {
+        needsStructuredOutput: needsCompatStructuredOutput,
+      });
+    }
+    if (needsCompatStructuredOutput && outputFormat) {
+      promptForExecutor = `${promptForExecutor}\n${buildJsonOutputInstruction(outputFormat.schema)}`;
+    }
+    const outputFormatForExecutor = needsCompatStructuredOutput ? undefined : outputFormat;
+
+    const result: ClaudePromptResult = await executor.run({
+      prompt: promptForExecutor,
+      sourceDir: repoPath,
+      context: '',
+      description: agentName,
       agentName,
       auditSession,
       logger,
-      AGENTS[agentName].modelTier,
-      outputFormat,
+      modelTier: AGENTS[agentName].modelTier,
+      outputFormat: outputFormatForExecutor,
       apiKey,
-      path.relative(repoPath, deliverablesPath),
+      deliverablesSubdir: path.relative(repoPath, deliverablesPath),
       providerConfig,
-    );
+    });
 
-    // 6. Spending cap check - defense-in-depth
-    if (result.success && (result.turns ?? 0) <= 2 && (result.cost || 0) === 0) {
+    // Compatibility-path post-validation: parse the final text into JSON,
+    // validate against `outputFormat.schema`, attach to `result.structuredOutput`
+    // so the existing step-8 queue-file write works unchanged.
+    if (needsCompatStructuredOutput && result.success && outputFormat) {
+      const extracted = extractStructuredOutput(result.result ?? '', outputFormat.schema);
+      if (extracted.ok) {
+        result.structuredOutput = extracted.value;
+      } else {
+        return this.failAgent(agentName, deliverablesPath, auditSession, logger, {
+          attemptNumber,
+          result,
+          rollbackReason: `${extracted.errorType}: ${extracted.message}`,
+          errorMessage: `Structured output ${extracted.errorType === 'structured_output_parse_error' ? 'parse' : 'validation'} failed: ${extracted.message}`,
+          errorCode: ErrorCode.OUTPUT_VALIDATION_FAILED,
+          category: 'validation',
+          retryable: true,
+          context: { agentName, errorType: extracted.errorType, rawSnippet: extracted.rawSnippet },
+        });
+      }
+    }
+
+    // 6. Spending cap check - defense-in-depth (Claude/Anthropic-specific text heuristic)
+    if (executor.id === 'claude' && result.success && (result.turns ?? 0) <= 2 && (result.cost || 0) === 0) {
       const resultText = result.result || '';
       if (isSpendingCapBehavior(result.turns ?? 0, result.cost || 0, resultText)) {
         return this.failAgent(agentName, deliverablesPath, auditSession, logger, {
