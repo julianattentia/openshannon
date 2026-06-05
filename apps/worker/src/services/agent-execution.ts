@@ -28,6 +28,7 @@ import { selectAgentExecutor } from '../ai/executor/select.js';
 import { buildJsonOutputInstruction, extractStructuredOutput } from '../ai/executor/structured-output.js';
 import { getOutputFormat, getQueueFilename } from '../ai/queue-schemas.js';
 import type { AuditSession } from '../audit/index.js';
+import { authStateFile } from '../audit/utils.js';
 import { AGENTS } from '../session-manager.js';
 import type { ActivityLogger } from '../types/activity-logger.js';
 import type { AgentName } from '../types/agents.js';
@@ -56,6 +57,7 @@ export interface AgentExecutionInput {
   apiKey?: string | undefined;
   promptDir?: string | undefined;
   providerConfig?: import('../types/config.js').ProviderConfig | undefined;
+  mcpServers?: Record<string, import('@anthropic-ai/claude-agent-sdk').McpServerConfig>;
 }
 
 interface FailAgentOpts {
@@ -110,6 +112,7 @@ export class AgentExecutionService {
       apiKey,
       promptDir,
       providerConfig,
+      mcpServers,
     } = input;
 
     // 1. Load config (pre-parsed configData → raw YAML → file path)
@@ -125,7 +128,7 @@ export class AgentExecutionService {
     try {
       prompt = await loadPrompt(
         promptTemplate,
-        { webUrl, repoPath },
+        { webUrl, repoPath, AUTH_STATE_FILE: authStateFile(auditSession.sessionMetadata) },
         distributedConfig,
         pipelineTestingMode,
         logger,
@@ -198,6 +201,7 @@ export class AgentExecutionService {
       apiKey,
       deliverablesSubdir: path.relative(repoPath, deliverablesPath),
       providerConfig,
+      mcpServers,
     });
 
     // Compatibility-path post-validation: parse the final text into JSON,

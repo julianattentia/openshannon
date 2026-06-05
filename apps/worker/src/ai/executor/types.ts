@@ -37,6 +37,12 @@ export interface ExecutorInput {
   apiKey?: string | undefined;
   deliverablesSubdir?: string | undefined;
   providerConfig?: ProviderConfig | undefined;
+  /**
+   * In-process MCP servers (e.g. structured-output collectors). Forwarded to
+   * the Claude Agent SDK by the Claude executor. The Hermes executor has no
+   * SDK MCP channel and ignores this field.
+   */
+  mcpServers?: Record<string, import('@anthropic-ai/claude-agent-sdk').McpServerConfig> | undefined;
 }
 
 /**

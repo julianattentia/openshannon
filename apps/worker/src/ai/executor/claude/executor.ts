@@ -32,6 +32,7 @@ export class ClaudeAgentExecutor implements AgentExecutor {
       input.apiKey,
       input.deliverablesSubdir,
       input.providerConfig,
+      input.mcpServers,
     );
   }
 }
