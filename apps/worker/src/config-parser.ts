@@ -390,7 +390,8 @@ const validateConfig = (config: Config): void => {
     !!config.vuln_classes ||
     config.exploit !== undefined ||
     !!config.report ||
-    !!config.rules_of_engagement;
+    !!config.rules_of_engagement ||
+    !!config.code_context;
   if (!hasAnySteering) {
     console.warn('⚠️  Configuration file contains no steering fields. The pentest will run with all defaults.');
   } else if (config.rules && !config.rules.avoid && !config.rules.focus) {
@@ -479,6 +480,20 @@ const performSecurityValidation = (config: Config): void => {
           'config',
           false,
           { field: 'rules_of_engagement', pattern: pattern.source },
+          ErrorCode.CONFIG_VALIDATION_FAILED,
+        );
+      }
+    }
+  }
+
+  if (config.code_context) {
+    for (const pattern of DANGEROUS_PATTERNS) {
+      if (pattern.test(config.code_context)) {
+        throw new PentestError(
+          `code_context contains potentially dangerous pattern: ${pattern.source}`,
+          'config',
+          false,
+          { field: 'code_context', pattern: pattern.source },
           ErrorCode.CONFIG_VALIDATION_FAILED,
         );
       }
@@ -681,6 +696,7 @@ export const distributeConfig = (config: Config | null): DistributedConfig => {
   };
 
   const rules_of_engagement = config?.rules_of_engagement?.trim() ?? '';
+  const code_context = config?.code_context?.trim() ?? '';
 
   return {
     avoid: avoid.map(sanitizeRule),
@@ -691,6 +707,7 @@ export const distributeConfig = (config: Config | null): DistributedConfig => {
     exploit,
     report,
     rules_of_engagement,
+    code_context,
   };
 };
 

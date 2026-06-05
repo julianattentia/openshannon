@@ -187,6 +187,12 @@
       "maxLength": 1000,
       "description": "Free-text instructions to the agent that render into every prompt."
     },
+    "code_context": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "Codebase-specific hints (framework, data-access clients, auth/session helpers, known outbound services) injected into the analysis prompts via {{CODE_CONTEXT}}. Keeps target-specific identifiers out of the shared prompt templates."
+    },
     "login": {
       "type": "object",
       "description": "Deprecated: Use 'authentication' section instead",
@@ -208,7 +214,8 @@
     { "required": ["vuln_classes"] },
     { "required": ["exploit"] },
     { "required": ["report"] },
-    { "required": ["rules_of_engagement"] }
+    { "required": ["rules_of_engagement"] },
+    { "required": ["code_context"] }
   ],
   "additionalProperties": false,
   "$defs": {

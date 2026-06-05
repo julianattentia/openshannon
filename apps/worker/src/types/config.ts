@@ -71,6 +71,7 @@ export interface Config {
   exploit?: 'true' | 'false';
   report?: ReportConfig;
   rules_of_engagement?: string;
+  code_context?: string;
 }
 
 export type RetryPreset = 'default' | 'subscription';
@@ -89,6 +90,7 @@ export interface DistributedConfig {
   exploit: boolean;
   report: ReportConfig;
   rules_of_engagement: string;
+  code_context: string;
 }
 
 /**

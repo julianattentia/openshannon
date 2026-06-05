@@ -38,6 +38,35 @@ ASSISTANT_MESSAGE_MAX = 20_000
 TOOL_INPUT_MAX = 20_000
 TOOL_RESULT_MAX = 20_000
 
+# Mid-turn 429 backoff: retry run_conversation up to this many times before
+# surfacing the error. Backoff starts at 60 s and caps at 120 s.
+_429_MAX_RETRIES = 12
+_429_BACKOFF_BASE_S = 60
+_429_BACKOFF_CAP_S = 120
+
+
+def _is_queue_full_error(msg: str) -> bool:
+    return "429" in msg or "queue is full" in msg.lower() or "rate limit" in msg.lower()
+
+
+def _is_queue_full(conversation: Any) -> bool:
+    """Return True when run_conversation ended due to a 429 / queue-full response."""
+    if not isinstance(conversation, dict):
+        _stderr(f"[429-debug] conversation not a dict: type={type(conversation).__name__}")
+        return False
+    # Check all string-valued keys for 429/rate-limit signals
+    for key, val in conversation.items():
+        if key == "messages":
+            continue
+        s = str(val or "")
+        if _is_queue_full_error(s):
+            _stderr(f"[429-debug] 429 detected in key={key!r}: {s[:120]!r}")
+            return True
+    # Also flag Hermes's explicit failure marker with no error string
+    if conversation.get("failed") and not conversation.get("completed"):
+        _stderr(f"[429-debug] failed=True, completed=False, error={str(conversation.get('error') or '')[:80]!r}")
+    return False
+
 # stdout lock so callback threads + heartbeat thread don't interleave.
 _STDOUT_LOCK = threading.Lock()
 
@@ -326,15 +355,39 @@ def _run_hermes(args: argparse.Namespace, prompt: str) -> int:
 
     started = time.monotonic()
     with _Heartbeat(args.heartbeat_interval_ms):
-        try:
-            agent = AIAgent(**kwargs)
-            conversation = agent.run_conversation(prompt)
-        except Exception as exc:  # pragma: no cover - real-Hermes path
-            duration_ms = int((time.monotonic() - started) * 1000)
-            payload = _error_envelope(args, f"{type(exc).__name__}: {exc}", "hermes_runtime_error", False)
-            payload["duration_ms"] = duration_ms
-            _emit(payload)
-            return 0
+        conversation: Any = None
+        for _429_attempt in range(_429_MAX_RETRIES + 1):
+            try:
+                agent = AIAgent(**kwargs)
+                conversation = agent.run_conversation(prompt)
+            except Exception as exc:  # pragma: no cover - real-Hermes path
+                exc_msg = f"{type(exc).__name__}: {exc}"
+                if _is_queue_full_error(exc_msg) and _429_attempt < _429_MAX_RETRIES:
+                    wait_s = min(_429_BACKOFF_BASE_S * (1.5 ** _429_attempt), _429_BACKOFF_CAP_S)
+                    _stderr(
+                        f"[wrapper] 429 exception (attempt {_429_attempt + 1}/{_429_MAX_RETRIES}),"
+                        f" retrying in {int(wait_s)}s…"
+                    )
+                    time.sleep(wait_s)
+                    continue
+                duration_ms = int((time.monotonic() - started) * 1000)
+                payload = _error_envelope(args, exc_msg, "hermes_runtime_error", False)
+                payload["duration_ms"] = duration_ms
+                _emit(payload)
+                return 0
+
+            if not _is_queue_full(conversation):
+                break
+
+            if _429_attempt >= _429_MAX_RETRIES:
+                break
+
+            wait_s = min(_429_BACKOFF_BASE_S * (1.5 ** _429_attempt), _429_BACKOFF_CAP_S)
+            _stderr(
+                f"[wrapper] 429 queue full (attempt {_429_attempt + 1}/{_429_MAX_RETRIES}),"
+                f" retrying in {int(wait_s)}s…"
+            )
+            time.sleep(wait_s)
 
     duration_ms = int((time.monotonic() - started) * 1000)
     error = conversation.get("error") if isinstance(conversation, dict) else None
