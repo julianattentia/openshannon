@@ -169,6 +169,7 @@ export class HermesAgentExecutor implements AgentExecutor {
     // call. Cleanup is deferred to the OS / operator — diagnostics in
     // HERMES_HOME are often valuable for debugging failed runs.
     const runHermesHome = await this.deriveRunHermesHome(input.agentName ?? 'unnamed');
+    const hermesSharedAuthDir = await ensureHermesSharedAuthDir(runHermesHome);
     const startedAt = Date.now();
     const auditLogger = createAuditLogger(input.auditSession);
     let turnCount = 0;
@@ -176,12 +177,18 @@ export class HermesAgentExecutor implements AgentExecutor {
     input.logger?.info(
       `Hermes executor starting${isMock ? (this.options.mockJsonlTranscript ? ' (transcript mock)' : ' (mock mode)') : ''}`,
     );
+    await logHermesAuthDiagnostics({
+      hermesHome: runHermesHome,
+      sharedAuthDir: hermesSharedAuthDir,
+      logger: input.logger,
+    });
 
     try {
       const outcome = await this.spawnAndStream({
         promptFile,
         cwd: input.sourceDir,
         hermesHome: runHermesHome,
+        hermesSharedAuthDir,
         onEvent: async (event) => {
           turnCount = await routeEvent({
             event,
@@ -242,6 +249,8 @@ export class HermesAgentExecutor implements AgentExecutor {
     } catch {
       // base config.yaml is optional
     }
+    await copyIfPresent(path.join(base, 'auth.json'), path.join(runDir, 'auth.json'));
+    await copyDirIfPresent(path.join(base, 'shared'), path.join(runDir, 'shared'));
 
     // If no base config.yaml is present and the operator gave us provider/model
     // via env (e.g. inside the Docker worker container), synthesize a minimal
@@ -281,6 +290,7 @@ export class HermesAgentExecutor implements AgentExecutor {
     promptFile: string;
     cwd: string;
     hermesHome: string;
+    hermesSharedAuthDir: string;
     onEvent: (event: HermesEvent) => Promise<void>;
   }): Promise<StreamOutcome> {
     const argv = this.buildArgs(args.promptFile, args.cwd);
@@ -296,7 +306,11 @@ export class HermesAgentExecutor implements AgentExecutor {
       try {
         child = spawn(this.options.pythonBin, argv, {
           cwd: args.cwd,
-          env: { ...process.env, HERMES_HOME: args.hermesHome },
+          env: {
+            ...process.env,
+            HERMES_HOME: args.hermesHome,
+            HERMES_SHARED_AUTH_DIR: args.hermesSharedAuthDir,
+          },
           stdio: ['ignore', 'pipe', 'pipe'],
           shell: false,
         });
@@ -562,6 +576,165 @@ async function safeUnlink(file: string): Promise<void> {
     await fs.rmdir(path.dirname(file));
   } catch {
     // best effort
+  }
+}
+
+async function ensureHermesSharedAuthDir(hermesHome: string): Promise<string> {
+  const sharedAuthDir = path.join(path.dirname(hermesHome), 'shared');
+  await fs.mkdir(sharedAuthDir, { recursive: true, mode: 0o700 });
+  return sharedAuthDir;
+}
+
+async function logHermesAuthDiagnostics(args: {
+  hermesHome: string;
+  sharedAuthDir: string;
+  logger: ExecutorInput['logger'];
+}): Promise<void> {
+  const { hermesHome, sharedAuthDir, logger } = args;
+  if (!logger) return;
+
+  const authPath = path.join(hermesHome, 'auth.json');
+  const sharedNousPath = path.join(sharedAuthDir, 'nous_auth.json');
+  const localSharedNousPath = path.join(hermesHome, 'shared', 'nous_auth.json');
+
+  const [authFile, sharedNousFile, localSharedNousFile] = await Promise.all([
+    describeJsonFile(authPath, summarizeHermesAuthJson),
+    describeJsonFile(sharedNousPath, summarizeNousSharedJson),
+    describeJsonFile(localSharedNousPath, summarizeNousSharedJson),
+  ]);
+
+  logger.info(
+    `Hermes auth diagnostics: home=${hermesHome} sharedAuthDir=${sharedAuthDir} ` +
+      `auth=${formatFileSummary(authFile)} sharedNous=${formatFileSummary(sharedNousFile)} ` +
+      `localSharedNous=${formatFileSummary(localSharedNousFile)}`,
+  );
+}
+
+interface JsonFileSummary {
+  path: string;
+  exists: boolean;
+  mtime?: string;
+  size?: number;
+  summary?: Record<string, unknown>;
+  error?: string;
+}
+
+async function describeJsonFile(
+  file: string,
+  summarize: (value: unknown) => Record<string, unknown>,
+): Promise<JsonFileSummary> {
+  try {
+    const stat = await fs.stat(file);
+    let summary: Record<string, unknown> | undefined;
+    try {
+      const value = JSON.parse(await fs.readFile(file, 'utf8')) as unknown;
+      summary = summarize(value);
+    } catch (err) {
+      return {
+        path: file,
+        exists: true,
+        mtime: stat.mtime.toISOString(),
+        size: stat.size,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+    return {
+      path: file,
+      exists: true,
+      mtime: stat.mtime.toISOString(),
+      size: stat.size,
+      summary,
+    };
+  } catch {
+    return { path: file, exists: false };
+  }
+}
+
+function summarizeHermesAuthJson(value: unknown): Record<string, unknown> {
+  const root = asRecord(value);
+  const providers = asRecord(root.providers);
+  const nous = asRecord(providers.nous);
+  const pool = asRecord(root.credential_pool);
+  const nousPool = Array.isArray(pool.nous) ? pool.nous : [];
+  const lastAuthError = asRecord(nous.last_auth_error);
+  return compactRecord({
+    activeProvider: stringOrUndefined(root.active_provider),
+    hasNousProvider: Object.keys(nous).length > 0,
+    nousFields: Object.keys(nous).filter((key) => !secretishKey(key)).sort(),
+    expiresAt: stringOrUndefined(nous.expires_at),
+    agentKeyExpiresAt: stringOrUndefined(nous.agent_key_expires_at),
+    inferenceBaseUrl: stringOrUndefined(nous.inference_base_url),
+    portalBaseUrl: stringOrUndefined(nous.portal_base_url),
+    poolEntries: nousPool.length,
+    lastAuthError: Object.keys(lastAuthError).length
+      ? compactRecord({
+          code: stringOrUndefined(lastAuthError.code),
+          reason: stringOrUndefined(lastAuthError.reason),
+          reloginRequired: booleanOrUndefined(lastAuthError.relogin_required),
+          at: stringOrUndefined(lastAuthError.at),
+        })
+      : undefined,
+    updatedAt: stringOrUndefined(root.updated_at),
+  });
+}
+
+function summarizeNousSharedJson(value: unknown): Record<string, unknown> {
+  const root = asRecord(value);
+  return compactRecord({
+    hasAccessToken: typeof root.access_token === 'string' && root.access_token.length > 0,
+    hasRefreshToken: typeof root.refresh_token === 'string' && root.refresh_token.length > 0,
+    expiresAt: stringOrUndefined(root.expires_at),
+    inferenceBaseUrl: stringOrUndefined(root.inference_base_url),
+    portalBaseUrl: stringOrUndefined(root.portal_base_url),
+    updatedAt: stringOrUndefined(root.updated_at),
+  });
+}
+
+function formatFileSummary(file: JsonFileSummary): string {
+  if (!file.exists) return `${file.path}:missing`;
+  const details = compactRecord({
+    mtime: file.mtime,
+    size: file.size,
+    error: file.error,
+    ...(file.summary ?? {}),
+  });
+  return `${file.path}:${JSON.stringify(details)}`;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function compactRecord(record: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined));
+}
+
+function stringOrUndefined(value: unknown): string | undefined {
+  return typeof value === 'string' && value !== '' ? value : undefined;
+}
+
+function booleanOrUndefined(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+function secretishKey(key: string): boolean {
+  return /token|key|secret|authorization|password/i.test(key);
+}
+
+async function copyIfPresent(from: string, to: string): Promise<void> {
+  try {
+    await fs.mkdir(path.dirname(to), { recursive: true });
+    await fs.copyFile(from, to);
+  } catch {
+    // Optional operator-provided Hermes state.
+  }
+}
+
+async function copyDirIfPresent(from: string, to: string): Promise<void> {
+  try {
+    await fs.cp(from, to, { recursive: true });
+  } catch {
+    // Optional operator-provided Hermes state.
   }
 }
 
