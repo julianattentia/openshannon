@@ -94,6 +94,7 @@ Options for 'start':
                             Aliases: pre_recon (→ pre-recon), auth / vuln:auth-session / auth-session (→ vuln:auth), ssrf / vuln:ssrf-config / ssrf-config / config-ssrf (→ vuln:ssrf), documents / document-processing / file-upload / upload / phi-artifacts (→ vuln:document-processing).
                             Required for staged staging trials (see HERMES_EXECUTOR.md).
       --no-exploit          Run all vuln agents but skip all exploit agents (default: exploit agents run if vuln queue is non-empty).
+      --extra-repo <path>   Mount an additional repo read-only inside the container (repeatable).
 
 Examples:
   ${prefix} start -u https://example.com -r ${mode === 'local' ? 'my-repo' : './my-repo'}
@@ -156,11 +157,13 @@ interface ParsedStartArgs {
   debug: boolean;
   noExploit: boolean;
   onlyPhase?: OnlyPhase;
+  extraRepos?: string[];
 }
 
 function parseStartArgs(argv: string[]): ParsedStartArgs {
   let url = '';
   let repo = '';
+  const extraRepos: string[] = [];
   let config: string | undefined;
   let workspace: string | undefined;
   let output: string | undefined;
@@ -218,6 +221,12 @@ function parseStartArgs(argv: string[]): ParsedStartArgs {
       case '--no-exploit':
         noExploit = true;
         break;
+      case '--extra-repo':
+        if (next && !next.startsWith('-')) {
+          extraRepos.push(next);
+          i++;
+        }
+        break;
       case '--only': {
         if (!next || next.startsWith('-')) {
           console.error(
@@ -256,6 +265,7 @@ function parseStartArgs(argv: string[]): ParsedStartArgs {
     pipelineTesting,
     debug,
     noExploit,
+    ...(extraRepos.length > 0 && { extraRepos }),
     ...(config && { config }),
     ...(workspace && { workspace }),
     ...(output && { output }),

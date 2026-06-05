@@ -321,6 +321,13 @@ async function interpolateVariables(
       result = result.replace(/<rules_of_engagement>[\s\S]*?<\/rules_of_engagement>\s*/g, '');
     }
 
+    const codeContext = config?.code_context?.trim() ?? '';
+    if (codeContext) {
+      result = result.replace(/{{CODE_CONTEXT}}/g, codeContext);
+    } else {
+      result = result.replace(/<code_context>[\s\S]*?<\/code_context>\s*/g, '');
+    }
+
     if (config?.authentication?.login_flow) {
       const loginInstructions = await buildLoginInstructions(config.authentication, logger, promptsBaseDir);
       result = result.replace(/{{LOGIN_INSTRUCTIONS}}/g, loginInstructions);

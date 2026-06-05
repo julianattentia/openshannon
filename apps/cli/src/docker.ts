@@ -197,6 +197,7 @@ export interface WorkerOptions {
   version: string;
   url: string;
   repo: { hostPath: string; containerPath: string };
+  extraRepos?: { hostPath: string; containerPath: string }[];
   workspacesDir: string;
   taskQueue: string;
   containerName: string;
@@ -234,6 +235,9 @@ export function spawnWorker(opts: WorkerOptions): ChildProcess {
   // Volume mounts
   args.push('-v', `${opts.workspacesDir}:/app/workspaces`);
   args.push('-v', `${opts.repo.hostPath}:${opts.repo.containerPath}:ro`);
+  for (const extra of opts.extraRepos ?? []) {
+    args.push('-v', `${extra.hostPath}:${extra.containerPath}:ro`);
+  }
 
   // Writable overlays: shadow .shannon/ and .playwright/ inside the :ro repo with workspace-backed dirs
   const workspacePath = path.join(opts.workspacesDir, opts.workspace);

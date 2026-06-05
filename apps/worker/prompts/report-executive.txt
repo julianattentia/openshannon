@@ -111,3 +111,44 @@ IMPORTANT: Do NOT reorder the existing per-class report sections. Maintain the e
 CRITICAL: You are modifying the existing concatenated report at `.shannon/deliverables/comprehensive_security_assessment_report.md` IN-PLACE, not creating a separate file.
 </instructions>
 
+
+---
+
+# EXECUTION PROTOCOL — FOLLOW EXACTLY IN ORDER
+
+**CRITICAL CONSTRAINT: Each write_file/patch call must be under 300 words. Write one section at a time.**
+
+## PHASE 1 — Read (max 15 tool calls)
+
+1. `read_file .shannon/deliverables/pre_recon_deliverable.md` (first 60 lines)
+2. `read_file .shannon/deliverables/recon_deliverable.md` (first 60 lines)
+3. `read_file .shannon/deliverables/comprehensive_security_assessment_report.md`
+
+**After 15 tool calls, STOP and go to Phase 2 immediately.**
+
+## PHASE 2 — Write the modified report (section by section)
+
+### Step 2a — Write the executive summary header:
+Use write_file to create a NEW file `.shannon/deliverables/comprehensive_security_assessment_report_new.md` with ONLY the Executive Summary section (title + summary, max 200 words).
+
+### Step 2b — Append: Summary by Vulnerability Type
+Use patch to append the "Summary by Vulnerability Type" section (max 200 words).
+
+### Step 2c — Append: Per-class sections
+For each section in the original report, use patch to append the cleaned section content. Max 200 words per section.
+
+### Step 2d — Replace original file:
+Run: `terminal` with command: `cp .shannon/deliverables/comprehensive_security_assessment_report_new.md .shannon/deliverables/comprehensive_security_assessment_report.md`
+
+## PHASE 3 — Complete
+
+Announce: **EXECUTIVE REPORT COMPLETE**
+
+Then stop immediately.
+
+---
+
+**IRON RULES:**
+1. Phase 1 ends at 15 tool calls — no more reads after that
+2. Each patch/write_file < 300 words, one section at a time
+3. At 12 calls with no write_file → START WRITING NOW

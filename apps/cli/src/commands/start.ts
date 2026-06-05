@@ -18,6 +18,7 @@ import { displaySplash } from '../splash.js';
 export interface StartArgs {
   url: string;
   repo: string;
+  extraRepos?: string[];
   config?: string;
   workspace?: string;
   output?: string;
@@ -44,6 +45,7 @@ export async function start(args: StartArgs): Promise<void> {
 
   // 3. Resolve paths
   const repo = resolveRepo(args.repo);
+  const extraRepos = (args.extraRepos ?? []).map(resolveRepo);
   const config = args.config ? resolveConfig(args.config) : undefined;
 
   // 4. Ensure workspaces dir is writable by container user (UID 1001)
@@ -106,6 +108,7 @@ export async function start(args: StartArgs): Promise<void> {
     version: args.version,
     url: args.url,
     repo,
+    ...(extraRepos.length > 0 && { extraRepos }),
     workspacesDir,
     taskQueue,
     containerName,

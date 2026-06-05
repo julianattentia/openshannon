@@ -46,6 +46,20 @@ const DEFAULT_MAX_ITERATIONS = 500;
 const DEFAULT_HEARTBEAT_MS = 20_000;
 const PROMPT_TRUNCATE_FOR_LOG = 200;
 
+// Mid-turn 429 / queue-full backoff at the TypeScript layer. When the LLM
+// server returns a rate-limit error inside run_conversation, the Python wrapper
+// surfaces it as a failed result. We retry here rather than letting Temporal
+// absorb each attempt (which adds a 5-30 min penalty per retry).
+const TS_429_MAX_RETRIES = 12;
+const TS_429_BACKOFF_BASE_MS = 60_000;
+const TS_429_BACKOFF_CAP_MS = 120_000;
+
+function is429Error(error: string | null | undefined): boolean {
+  if (!error) return false;
+  const lower = error.toLowerCase();
+  return lower.includes('429') || lower.includes('queue is full') || lower.includes('rate limit');
+}
+
 export interface HermesAgentExecutorOptions {
   pythonBin?: string;
   wrapperPath?: string;
@@ -178,34 +192,47 @@ export class HermesAgentExecutor implements AgentExecutor {
     );
 
     try {
-      const outcome = await this.spawnAndStream({
-        promptFile,
-        cwd: input.sourceDir,
-        hermesHome: runHermesHome,
-        onEvent: async (event) => {
-          turnCount = await routeEvent({
-            event,
-            auditLogger,
-            logger: input.logger,
-            turnCount,
-          });
-        },
-      });
-      const duration = Date.now() - startedAt;
-      const result = await this.shapeResult({
-        outcome,
-        duration,
-        fullPrompt,
-        turnCount,
-      });
-      if (!result.success && result.error) {
+      let result: ExecutorResult | undefined;
+      for (let _429attempt = 0; _429attempt <= TS_429_MAX_RETRIES; _429attempt++) {
+        const outcome = await this.spawnAndStream({
+          promptFile,
+          cwd: input.sourceDir,
+          hermesHome: runHermesHome,
+          onEvent: async (event) => {
+            turnCount = await routeEvent({
+              event,
+              auditLogger,
+              logger: input.logger,
+              turnCount,
+            });
+          },
+        });
+        const duration = Date.now() - startedAt;
+        result = await this.shapeResult({
+          outcome,
+          duration,
+          fullPrompt,
+          turnCount,
+        });
+
+        if (result.success || !is429Error(result.error)) break;
+        if (_429attempt >= TS_429_MAX_RETRIES) break;
+
+        const waitMs = Math.min(TS_429_BACKOFF_BASE_MS * 1.5 ** _429attempt, TS_429_BACKOFF_CAP_MS);
+        input.logger?.warn(
+          `[429 backoff] queue full, retrying in ${Math.round(waitMs / 1000)}s (attempt ${_429attempt + 1}/${TS_429_MAX_RETRIES})`,
+        );
+        await new Promise<void>((resolve) => setTimeout(resolve, waitMs));
+      }
+
+      if (!result!.success && result!.error) {
         try {
-          await auditLogger.logError(new Error(result.error), duration, result.turns ?? turnCount);
+          await auditLogger.logError(new Error(result!.error), Date.now() - startedAt, result!.turns ?? turnCount);
         } catch {
           // best-effort audit
         }
       }
-      return result;
+      return result!;
     } finally {
       await safeUnlink(promptFile);
       input.logger?.info('Hermes executor finished');
