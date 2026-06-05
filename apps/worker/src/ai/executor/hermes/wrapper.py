@@ -103,6 +103,61 @@ def _stderr(msg: str) -> None:
     sys.stderr.flush()
 
 
+def _install_nous_access_token_runtime_patch() -> None:
+    """Prefer Nous OAuth invoke JWTs over legacy agent keys in Hermes.
+
+    Hermes 0.15.1 can refresh Nous OAuth successfully, persist the rotated
+    token, then return/use a legacy ``agent_key`` that the Nous inference API
+    rejects with 401. Shannon runs are long-lived enough to hit that expiry
+    boundary often. The refreshed OAuth access token is itself an
+    inference-scoped JWT and works as the OpenAI-compatible bearer token, so
+    force Hermes' runtime credential resolver to return it when present.
+    """
+    if os.environ.get("SHANNON_HERMES_NOUS_ACCESS_TOKEN_PATCH", "1").lower() in {"0", "false", "no"}:
+        return
+
+    try:
+        import hermes_cli.auth as auth_mod  # type: ignore[import-not-found]
+    except Exception as exc:
+        _stderr(f"Shannon Nous auth patch unavailable: {type(exc).__name__}: {exc}")
+        return
+
+    original = getattr(auth_mod, "resolve_nous_runtime_credentials", None)
+    if not callable(original) or getattr(original, "_shannon_access_token_patch", False):
+        return
+
+    def patched_resolve_nous_runtime_credentials(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        creds = original(*args, **kwargs)
+        if not isinstance(creds, dict):
+            return creds
+        try:
+            state = auth_mod.get_provider_auth_state("nous") or {}
+        except Exception:
+            state = {}
+        access_token = state.get("access_token")
+        if isinstance(access_token, str) and access_token.strip():
+            patched = dict(creds)
+            patched["api_key"] = access_token.strip()
+            patched["source"] = "oauth_access_token"
+            patched["auth_path"] = "oauth_access_token"
+            patched["expires_at"] = state.get("expires_at") or patched.get("expires_at")
+            return patched
+        return creds
+
+    patched_resolve_nous_runtime_credentials._shannon_access_token_patch = True  # type: ignore[attr-defined]
+    auth_mod.resolve_nous_runtime_credentials = patched_resolve_nous_runtime_credentials
+
+    try:
+        import hermes_cli.runtime_provider as runtime_provider_mod  # type: ignore[import-not-found]
+
+        if hasattr(runtime_provider_mod, "resolve_nous_runtime_credentials"):
+            runtime_provider_mod.resolve_nous_runtime_credentials = patched_resolve_nous_runtime_credentials
+    except Exception:
+        pass
+
+    _stderr("Shannon Nous auth patch active: preferring refreshed OAuth access token for runtime API key")
+
+
 def _truncate(value: str, limit: int) -> tuple[str, bool]:
     if len(value) <= limit:
         return value, False
@@ -310,6 +365,7 @@ def _run_hermes(args: argparse.Namespace, prompt: str) -> int:
     except Exception as exc:  # pragma: no cover - exercised only with Hermes installed
         _emit(_error_envelope(args, f"Failed to import Hermes AIAgent: {exc}", "hermes_import_failed", False))
         return 0
+    _install_nous_access_token_runtime_patch()
 
     def _on_tool_start(*cb_args: Any, **cb_kwargs: Any) -> None:
         name, tool_input, tool_id = _extract_tool_start(cb_args, cb_kwargs)
