@@ -45,7 +45,7 @@ Use write_file to create `.shannon/deliverables/ssrf_analysis_deliverable.md` wi
 ```
 
 ### Step 2b — Append: Executive Summary
-Use patch to append a 3-4 sentence summary stating whether any fetch() target is user-controlled versus hardcoded/environment-configured. See <code_context> for known outbound services in this codebase. Max 100 words.
+Use patch to append a 3-4 sentence summary stating whether any fetch() target is user-controlled versus hardcoded/environment-configured. If <code_context> lists known outbound services, use it. Max 100 words.
 
 ### Step 2c — Append: Vulnerabilities Found
 Use patch to append findings. If none: "No SSRF vulnerabilities found. All server-side fetch calls target hardcoded or environment-variable URLs; no user-controlled URL inputs found in any API route." Max 200 words.
