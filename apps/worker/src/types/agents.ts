@@ -37,6 +37,7 @@ export type AgentName = (typeof ALL_AGENTS)[number];
 export type PlaywrightSession = 'agent1' | 'agent2' | 'agent3' | 'agent4' | 'agent5';
 
 import type { ActivityLogger } from './activity-logger.js';
+import type { ExecutorId } from '../ai/executor/types.js';
 
 export type AgentValidator = (sourceDir: string, logger: ActivityLogger) => Promise<boolean>;
 
@@ -49,6 +50,8 @@ export interface AgentDefinition {
   promptTemplate: string;
   deliverableFilename: string;
   modelTier?: 'small' | 'medium' | 'large';
+  /** Built-in default executor for this agent. Unset = use config/global default. */
+  executor?: ExecutorId;
 }
 
 /**
