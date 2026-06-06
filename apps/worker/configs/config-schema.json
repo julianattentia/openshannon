@@ -198,6 +198,24 @@
       "description": "Per-agent executor routing. Maps an agent name to the executor that runs it. Agents not listed fall back to the agent's built-in default, then SHANNON_EXECUTOR, then the global default.",
       "additionalProperties": { "type": "string", "enum": ["claude", "hermes"] }
     },
+    "hermes_models": {
+      "type": "object",
+      "description": "Named Hermes model targets ('model types'). Each label maps to a provider/model/base_url that a Hermes-routed agent can run on.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "provider": { "type": "string", "minLength": 1 },
+          "model": { "type": "string", "minLength": 1 },
+          "base_url": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "agent_models": {
+      "type": "object",
+      "description": "Maps an agent name (or the literal 'default') to a label defined in hermes_models. Hermes-routed agents not listed fall back to 'default', then the single SHANNON_HERMES_* env target.",
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
     "login": {
       "type": "object",
       "description": "Deprecated: Use 'authentication' section instead",
@@ -221,6 +239,8 @@
     { "required": ["report"] },
     { "required": ["rules_of_engagement"] },
     { "required": ["code_context"] },
+    { "required": ["hermes_models"] },
+    { "required": ["agent_models"] },
     { "required": ["agent_executors"] }
   ],
   "additionalProperties": false,

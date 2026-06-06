@@ -76,6 +76,17 @@ export interface Config {
   code_context?: string;
   /** Per-agent executor routing. Maps agent name → executor for this run. */
   agent_executors?: Record<string, ExecutorId>;
+  /** Named Hermes model targets ("model types"), keyed by an arbitrary label. */
+  hermes_models?: Record<string, HermesModelTarget>;
+  /** Maps agent name (or "default") → a label defined in `hermes_models`. */
+  agent_models?: Record<string, string>;
+}
+
+/** A named Hermes model target: which provider/model/endpoint to run. */
+export interface HermesModelTarget {
+  provider?: string;
+  model?: string;
+  base_url?: string;
 }
 
 export type RetryPreset = 'default' | 'subscription';
@@ -96,6 +107,8 @@ export interface DistributedConfig {
   rules_of_engagement: string;
   code_context: string;
   agent_executors: Record<string, ExecutorId>;
+  hermes_models: Record<string, HermesModelTarget>;
+  agent_models: Record<string, string>;
 }
 
 /**
