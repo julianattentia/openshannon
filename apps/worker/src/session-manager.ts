@@ -25,6 +25,7 @@ export const AGENTS: Readonly<Record<AgentName, AgentDefinition>> = Object.freez
     prerequisites: ['pre-recon'],
     promptTemplate: 'recon',
     deliverableFilename: 'recon_deliverable.md',
+    modelTier: 'large',
   },
   'injection-vuln': {
     name: 'injection-vuln',
@@ -32,6 +33,7 @@ export const AGENTS: Readonly<Record<AgentName, AgentDefinition>> = Object.freez
     prerequisites: ['recon'],
     promptTemplate: 'vuln-injection',
     deliverableFilename: 'injection_analysis_deliverable.md',
+    modelTier: 'medium',
   },
   'xss-vuln': {
     name: 'xss-vuln',
@@ -39,6 +41,7 @@ export const AGENTS: Readonly<Record<AgentName, AgentDefinition>> = Object.freez
     prerequisites: ['recon'],
     promptTemplate: 'vuln-xss',
     deliverableFilename: 'xss_analysis_deliverable.md',
+    modelTier: 'medium',
   },
   'auth-vuln': {
     name: 'auth-vuln',
@@ -46,6 +49,7 @@ export const AGENTS: Readonly<Record<AgentName, AgentDefinition>> = Object.freez
     prerequisites: ['recon'],
     promptTemplate: 'vuln-auth',
     deliverableFilename: 'auth_analysis_deliverable.md',
+    modelTier: 'large',
   },
   'ssrf-vuln': {
     name: 'ssrf-vuln',
@@ -53,6 +57,7 @@ export const AGENTS: Readonly<Record<AgentName, AgentDefinition>> = Object.freez
     prerequisites: ['recon'],
     promptTemplate: 'vuln-ssrf',
     deliverableFilename: 'ssrf_analysis_deliverable.md',
+    modelTier: 'medium',
   },
   'authz-vuln': {
     name: 'authz-vuln',
@@ -60,6 +65,7 @@ export const AGENTS: Readonly<Record<AgentName, AgentDefinition>> = Object.freez
     prerequisites: ['recon'],
     promptTemplate: 'vuln-authz',
     deliverableFilename: 'authz_analysis_deliverable.md',
+    modelTier: 'large',
   },
   'injection-exploit': {
     name: 'injection-exploit',
@@ -67,6 +73,7 @@ export const AGENTS: Readonly<Record<AgentName, AgentDefinition>> = Object.freez
     prerequisites: ['injection-vuln'],
     promptTemplate: 'exploit-injection',
     deliverableFilename: 'injection_exploitation_evidence.md',
+    modelTier: 'medium',
   },
   'xss-exploit': {
     name: 'xss-exploit',
@@ -74,6 +81,7 @@ export const AGENTS: Readonly<Record<AgentName, AgentDefinition>> = Object.freez
     prerequisites: ['xss-vuln'],
     promptTemplate: 'exploit-xss',
     deliverableFilename: 'xss_exploitation_evidence.md',
+    modelTier: 'medium',
   },
   'auth-exploit': {
     name: 'auth-exploit',
@@ -81,6 +89,7 @@ export const AGENTS: Readonly<Record<AgentName, AgentDefinition>> = Object.freez
     prerequisites: ['auth-vuln'],
     promptTemplate: 'exploit-auth',
     deliverableFilename: 'auth_exploitation_evidence.md',
+    modelTier: 'medium',
   },
   'ssrf-exploit': {
     name: 'ssrf-exploit',
@@ -88,6 +97,7 @@ export const AGENTS: Readonly<Record<AgentName, AgentDefinition>> = Object.freez
     prerequisites: ['ssrf-vuln'],
     promptTemplate: 'exploit-ssrf',
     deliverableFilename: 'ssrf_exploitation_evidence.md',
+    modelTier: 'medium',
   },
   'authz-exploit': {
     name: 'authz-exploit',
@@ -95,6 +105,7 @@ export const AGENTS: Readonly<Record<AgentName, AgentDefinition>> = Object.freez
     prerequisites: ['authz-vuln'],
     promptTemplate: 'exploit-authz',
     deliverableFilename: 'authz_exploitation_evidence.md',
+    modelTier: 'medium',
   },
   report: {
     name: 'report',
@@ -102,6 +113,7 @@ export const AGENTS: Readonly<Record<AgentName, AgentDefinition>> = Object.freez
     prerequisites: ['injection-exploit', 'xss-exploit', 'auth-exploit', 'ssrf-exploit', 'authz-exploit'],
     promptTemplate: 'report-executive',
     deliverableFilename: 'comprehensive_security_assessment_report.md',
+    modelTier: 'large',
   },
 });
 

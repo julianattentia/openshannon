@@ -65,6 +65,28 @@ export function resolveExecutorId(options: SelectAgentExecutorOptions = {}): Exe
 }
 
 /**
+ * Resolve the executor for a single agent.
+ *
+ * Precedence: per-run config map → agent built-in default → SHANNON_EXECUTOR →
+ * global default. Routing is always explicit; there is no silent fallback.
+ */
+export function resolveAgentExecutorId(opts: {
+  agentName: string;
+  agentExecutors?: Record<string, ExecutorId> | undefined;
+  agentDefault?: ExecutorId | undefined;
+  env?: NodeJS.ProcessEnv | undefined;
+}): ExecutorId {
+  const fromConfig = opts.agentExecutors?.[opts.agentName];
+  if (fromConfig) {
+    return fromConfig;
+  }
+  if (opts.agentDefault) {
+    return opts.agentDefault;
+  }
+  return resolveExecutorId({ env: opts.env });
+}
+
+/**
  * Construct the selected executor. Defaults to Claude.
  *
  * @throws if the resolved id is unknown.

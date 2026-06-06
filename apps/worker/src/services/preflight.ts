@@ -28,10 +28,13 @@ import net, { type LookupFunction } from 'node:net';
 import type { SDKAssistantMessageError } from '@anthropic-ai/claude-agent-sdk';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { glob } from 'zx';
-import { resolveExecutorId } from '../ai/executor/select.js';
+import { resolveAgentExecutorId } from '../ai/executor/select.js';
+import type { ExecutorId } from '../ai/executor/types.js';
 import { resolveModel } from '../ai/models.js';
 import { parseConfig } from '../config-parser.js';
+import { AGENTS } from '../session-manager.js';
 import type { ActivityLogger } from '../types/activity-logger.js';
+import { ALL_AGENTS } from '../types/agents.js';
 import type { Config, Rule } from '../types/config.js';
 import { ErrorCode } from '../types/errors.js';
 import { err, ok, type Result } from '../types/result.js';
@@ -601,6 +604,29 @@ async function validateTargetUrl(targetUrl: string, logger: ActivityLogger): Pro
  *
  * Returns on first failure.
  */
+/**
+ * The set of executors a run will actually use, across all agents. Used to
+ * decide which credentials to validate. `agentExecutors` is the per-run config
+ * map (or null); `env` defaults to process.env.
+ */
+export function usedExecutors(
+  agentExecutors: Record<string, ExecutorId> | null,
+  env: NodeJS.ProcessEnv = process.env,
+): Set<ExecutorId> {
+  const set = new Set<ExecutorId>();
+  for (const agentName of ALL_AGENTS) {
+    set.add(
+      resolveAgentExecutorId({
+        agentName,
+        agentExecutors: agentExecutors ?? undefined,
+        agentDefault: AGENTS[agentName].executor,
+        env,
+      }),
+    );
+  }
+  return set;
+}
+
 export async function runPreflightChecks(
   targetUrl: string,
   repoPath: string,
@@ -638,14 +664,15 @@ export async function runPreflightChecks(
   // 4. Credential check (cheap — 1 SDK round-trip).
   // Skipped when providerConfig is present (Bedrock/Vertex managed externally).
   // Skipped when the resolved executor is Hermes — Hermes manages its own credentials.
-  const resolvedExecutor = resolveExecutorId();
-  if (resolvedExecutor === 'hermes') {
-    logger.info('Hermes executor — skipping Claude credential validation');
-  } else {
+  const executors = usedExecutors(parsedConfig?.agent_executors ?? null);
+  if (executors.has('claude')) {
+    logger.info(`Validating Claude credentials (executors in use: ${[...executors].join(', ')})`);
     const credResult = await validateCredentials(logger, apiKey, providerConfig);
     if (!credResult.ok) {
       return credResult;
     }
+  } else {
+    logger.info('No agent routes to Claude — skipping Claude credential validation');
   }
 
   // 5. Target URL reachability check (cheap — 1 HTTP round-trip)

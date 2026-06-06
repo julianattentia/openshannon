@@ -8,6 +8,8 @@
  * Configuration type definitions
  */
 
+import type { ExecutorId } from '../ai/executor/types.js';
+
 export type RuleType = 'url_path' | 'subdomain' | 'domain' | 'method' | 'header' | 'parameter' | 'code_path';
 
 export interface Rule {
@@ -72,6 +74,8 @@ export interface Config {
   report?: ReportConfig;
   rules_of_engagement?: string;
   code_context?: string;
+  /** Per-agent executor routing. Maps agent name → executor for this run. */
+  agent_executors?: Record<string, ExecutorId>;
 }
 
 export type RetryPreset = 'default' | 'subscription';
@@ -91,6 +95,7 @@ export interface DistributedConfig {
   report: ReportConfig;
   rules_of_engagement: string;
   code_context: string;
+  agent_executors: Record<string, ExecutorId>;
 }
 
 /**
