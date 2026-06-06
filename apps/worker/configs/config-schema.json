@@ -193,6 +193,11 @@
       "maxLength": 2000,
       "description": "Codebase-specific hints (framework, data-access clients, auth/session helpers, known outbound services) injected into the analysis prompts via {{CODE_CONTEXT}}. Keeps target-specific identifiers out of the shared prompt templates."
     },
+    "agent_executors": {
+      "type": "object",
+      "description": "Per-agent executor routing. Maps an agent name to the executor that runs it. Agents not listed fall back to the agent's built-in default, then SHANNON_EXECUTOR, then the global default.",
+      "additionalProperties": { "type": "string", "enum": ["claude", "hermes"] }
+    },
     "login": {
       "type": "object",
       "description": "Deprecated: Use 'authentication' section instead",
@@ -215,7 +220,8 @@
     { "required": ["exploit"] },
     { "required": ["report"] },
     { "required": ["rules_of_engagement"] },
-    { "required": ["code_context"] }
+    { "required": ["code_context"] },
+    { "required": ["agent_executors"] }
   ],
   "additionalProperties": false,
   "$defs": {

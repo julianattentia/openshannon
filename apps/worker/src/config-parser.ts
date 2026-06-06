@@ -10,6 +10,7 @@ import type { FormatsPlugin } from 'ajv-formats';
 import yaml from 'js-yaml';
 import { fs } from 'zx';
 import { PentestError } from './services/error-handling.js';
+import { ALL_AGENTS } from './types/agents.js';
 import {
   ALL_VULN_CLASSES,
   type Authentication,
@@ -391,7 +392,8 @@ const validateConfig = (config: Config): void => {
     config.exploit !== undefined ||
     !!config.report ||
     !!config.rules_of_engagement ||
-    !!config.code_context;
+    !!config.code_context ||
+    !!config.agent_executors;
   if (!hasAnySteering) {
     console.warn('⚠️  Configuration file contains no steering fields. The pentest will run with all defaults.');
   } else if (config.rules && !config.rules.avoid && !config.rules.focus) {
@@ -494,6 +496,21 @@ const performSecurityValidation = (config: Config): void => {
           'config',
           false,
           { field: 'code_context', pattern: pattern.source },
+          ErrorCode.CONFIG_VALIDATION_FAILED,
+        );
+      }
+    }
+  }
+
+  if (config.agent_executors) {
+    const known = new Set<string>(ALL_AGENTS);
+    for (const agentName of Object.keys(config.agent_executors)) {
+      if (!known.has(agentName)) {
+        throw new PentestError(
+          `agent_executors references unknown agent "${agentName}". Known agents: ${ALL_AGENTS.join(', ')}.`,
+          'config',
+          false,
+          { field: 'agent_executors', agentName },
           ErrorCode.CONFIG_VALIDATION_FAILED,
         );
       }
@@ -697,6 +714,7 @@ export const distributeConfig = (config: Config | null): DistributedConfig => {
 
   const rules_of_engagement = config?.rules_of_engagement?.trim() ?? '';
   const code_context = config?.code_context?.trim() ?? '';
+  const agent_executors = { ...(config?.agent_executors ?? {}) };
 
   return {
     avoid: avoid.map(sanitizeRule),
@@ -708,6 +726,7 @@ export const distributeConfig = (config: Config | null): DistributedConfig => {
     report,
     rules_of_engagement,
     code_context,
+    agent_executors,
   };
 };
 
