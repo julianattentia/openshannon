@@ -24,6 +24,7 @@
 import { fs, path } from 'zx';
 import { type ClaudePromptResult, validateAgentOutput } from '../ai/claude-executor.js';
 import { applyHermesPromptShim } from '../ai/executor/hermes/prompt-shim.js';
+import { resolveHermesTargetForAgent } from '../ai/executor/hermes/model-target.js';
 import { resolveAgentExecutorId, selectAgentExecutor } from '../ai/executor/select.js';
 import { buildJsonOutputInstruction, extractStructuredOutput } from '../ai/executor/structured-output.js';
 import { getOutputFormat, getQueueFilename } from '../ai/queue-schemas.js';
@@ -174,7 +175,18 @@ export class AgentExecutionService {
       agentExecutors: distributedConfig?.agent_executors,
       agentDefault: AGENTS[agentName].executor,
     });
-    const executor = selectAgentExecutor({ executorId, logger });
+    // For Hermes-routed agents, resolve the per-agent model target (provider/
+    // model/base_url) from config, falling back to the single SHANNON_HERMES_* env.
+    const hermes =
+      executorId === 'hermes'
+        ? resolveHermesTargetForAgent({
+            agentName,
+            hermesModels: distributedConfig?.hermes_models ?? {},
+            agentModels: distributedConfig?.agent_models ?? {},
+            env: process.env,
+          })
+        : undefined;
+    const executor = selectAgentExecutor({ executorId, logger, ...(hermes && { hermes }) });
 
     // Build the prompt the executor will see. Order matters:
     //   1. Hermes-only tool-name compatibility shim (no effect on Claude).

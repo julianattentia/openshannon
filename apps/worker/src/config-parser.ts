@@ -393,7 +393,9 @@ const validateConfig = (config: Config): void => {
     !!config.report ||
     !!config.rules_of_engagement ||
     !!config.code_context ||
-    !!config.agent_executors;
+    !!config.agent_executors ||
+    !!config.hermes_models ||
+    !!config.agent_models;
   if (!hasAnySteering) {
     console.warn('⚠️  Configuration file contains no steering fields. The pentest will run with all defaults.');
   } else if (config.rules && !config.rules.avoid && !config.rules.focus) {
@@ -511,6 +513,31 @@ const performSecurityValidation = (config: Config): void => {
           'config',
           false,
           { field: 'agent_executors', agentName },
+          ErrorCode.CONFIG_VALIDATION_FAILED,
+        );
+      }
+    }
+  }
+
+  if (config.agent_models) {
+    const known = new Set<string>(ALL_AGENTS);
+    const labels = new Set<string>(Object.keys(config.hermes_models ?? {}));
+    for (const [agentName, label] of Object.entries(config.agent_models)) {
+      if (agentName !== 'default' && !known.has(agentName)) {
+        throw new PentestError(
+          `agent_models references unknown agent "${agentName}". Known agents: ${ALL_AGENTS.join(', ')} (or "default").`,
+          'config',
+          false,
+          { field: 'agent_models', agentName },
+          ErrorCode.CONFIG_VALIDATION_FAILED,
+        );
+      }
+      if (!labels.has(label)) {
+        throw new PentestError(
+          `agent_models maps "${agentName}" to undefined model label "${label}". Define it under hermes_models.`,
+          'config',
+          false,
+          { field: 'agent_models', agentName, label },
           ErrorCode.CONFIG_VALIDATION_FAILED,
         );
       }
@@ -715,6 +742,8 @@ export const distributeConfig = (config: Config | null): DistributedConfig => {
   const rules_of_engagement = config?.rules_of_engagement?.trim() ?? '';
   const code_context = config?.code_context?.trim() ?? '';
   const agent_executors = { ...(config?.agent_executors ?? {}) };
+  const hermes_models = { ...(config?.hermes_models ?? {}) };
+  const agent_models = { ...(config?.agent_models ?? {}) };
 
   return {
     avoid: avoid.map(sanitizeRule),
@@ -727,6 +756,8 @@ export const distributeConfig = (config: Config | null): DistributedConfig => {
     rules_of_engagement,
     code_context,
     agent_executors,
+    hermes_models,
+    agent_models,
   };
 };
 
