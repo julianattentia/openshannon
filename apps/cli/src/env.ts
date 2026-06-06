@@ -38,6 +38,7 @@ const FORWARD_VARS = [
   'SHANNON_HERMES_MOCK_RESULT',
   'SHANNON_HERMES_MOCK_JSONL_TRANSCRIPT',
   'HERMES_HOME',
+  'HERMES_SEED_DIR',
   'HERMES_E2E',
 
   // --- Anthropic / Claude (legacy default; still required when SHANNON_EXECUTOR=claude) ---

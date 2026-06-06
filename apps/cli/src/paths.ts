@@ -6,6 +6,7 @@
  */
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { isLocal } from './mode.js';
 
@@ -74,5 +75,26 @@ export function resolveConfig(configArg: string): MountPair {
   return {
     hostPath,
     containerPath: `/app/configs/${basename}`,
+  };
+}
+
+/**
+ * Resolve the Hermes credential seed directory to mount read-only into the
+ * worker. Used so Hermes-routed agents can reach providers requiring auth
+ * (e.g. Nous OAuth in `auth.json` + `shared/nous_auth.json`). Honors an
+ * explicit `SHANNON_HERMES_SEED_DIR`, else auto-detects `~/.hermes`. Returns
+ * `undefined` when neither exists (no Nous → no mount, behavior unchanged).
+ */
+export function resolveHermesSeed(): MountPair | undefined {
+  const explicit = process.env.SHANNON_HERMES_SEED_DIR;
+  const hostPath = explicit ? path.resolve(explicit) : path.join(os.homedir(), '.hermes');
+
+  if (!fs.existsSync(hostPath) || !fs.statSync(hostPath).isDirectory()) {
+    return undefined;
+  }
+
+  return {
+    hostPath,
+    containerPath: '/hermes-seed',
   };
 }

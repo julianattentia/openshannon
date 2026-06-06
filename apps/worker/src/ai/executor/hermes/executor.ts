@@ -260,24 +260,29 @@ export class HermesAgentExecutor implements AgentExecutor {
     const env = process.env;
     const base =
       env.HERMES_HOME && env.HERMES_HOME.trim() !== '' ? env.HERMES_HOME : path.join(os.tmpdir(), 'shannon-hermes');
+    // Credentials/config are SEEDED from `seedDir` (read-only is fine — e.g. a
+    // mounted ~/.hermes), but per-run state lives under the writable `base`.
+    // This lets the worker mount Nous OAuth read-only while the per-run copy
+    // (which the OAuth-refresh patch may rewrite) stays writable.
+    const seedDir = env.HERMES_SEED_DIR && env.HERMES_SEED_DIR.trim() !== '' ? env.HERMES_SEED_DIR : base;
     const safeAgent = agentName.replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 40) || 'agent';
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const rand = randomBytes(4).toString('hex');
     const runDir = path.join(base, `${safeAgent}-${stamp}-${rand}`);
     await fs.mkdir(runDir, { recursive: true });
 
-    // Seed config.yaml from the base if present. Operators who configure Hermes
-    // via `<base>/config.yaml` get that profile inherited into each per-run dir,
-    // while volatile state (sessions, memories, skills) stays isolated.
+    // Seed config.yaml from the seed dir if present. Operators who configure
+    // Hermes via `<seed>/config.yaml` get that profile inherited into each
+    // per-run dir, while volatile state (sessions, memories, skills) stays isolated.
     let copiedFromBase = false;
     try {
-      await fs.copyFile(path.join(base, 'config.yaml'), path.join(runDir, 'config.yaml'));
+      await fs.copyFile(path.join(seedDir, 'config.yaml'), path.join(runDir, 'config.yaml'));
       copiedFromBase = true;
     } catch {
       // base config.yaml is optional
     }
-    await copyIfPresent(path.join(base, 'auth.json'), path.join(runDir, 'auth.json'));
-    await copyDirIfPresent(path.join(base, 'shared'), path.join(runDir, 'shared'));
+    await copyIfPresent(path.join(seedDir, 'auth.json'), path.join(runDir, 'auth.json'));
+    await copyDirIfPresent(path.join(seedDir, 'shared'), path.join(runDir, 'shared'));
 
     // If no base config.yaml is present and the operator gave us provider/model
     // via env (e.g. inside the Docker worker container), synthesize a minimal

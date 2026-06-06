@@ -12,7 +12,7 @@ import { ensureImage, ensureInfra, randomSuffix, spawnWorker } from '../docker.j
 import { buildEnvFlags, loadEnv, validateCredentials } from '../env.js';
 import { getCredentialsPath, getWorkspacesDir, initHome } from '../home.js';
 import { isLocal } from '../mode.js';
-import { resolveConfig, resolveRepo } from '../paths.js';
+import { resolveConfig, resolveHermesSeed, resolveRepo } from '../paths.js';
 import { displaySplash } from '../splash.js';
 
 export interface StartArgs {
@@ -47,6 +47,13 @@ export async function start(args: StartArgs): Promise<void> {
   const repo = resolveRepo(args.repo);
   const extraRepos = (args.extraRepos ?? []).map(resolveRepo);
   const config = args.config ? resolveConfig(args.config) : undefined;
+  // Optional Hermes credential seed (e.g. ~/.hermes for Nous OAuth). When
+  // present, mount it read-only and point HERMES_SEED_DIR at the container path
+  // so the worker seeds per-run credentials from it (set before buildEnvFlags).
+  const hermesSeed = resolveHermesSeed();
+  if (hermesSeed) {
+    process.env.HERMES_SEED_DIR = hermesSeed.containerPath;
+  }
 
   // 4. Ensure workspaces dir is writable by container user (UID 1001)
   const workspacesDir = getWorkspacesDir();
@@ -114,6 +121,7 @@ export async function start(args: StartArgs): Promise<void> {
     containerName,
     envFlags: buildEnvFlags(),
     ...(config && { config }),
+    ...(hermesSeed && { hermesSeed }),
     ...(hasCredentials && { credentials: credentialsPath }),
     ...(promptsDir && { promptsDir }),
     ...(outputDir && { outputDir }),

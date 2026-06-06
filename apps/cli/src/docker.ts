@@ -286,6 +286,7 @@ export interface WorkerOptions {
   envFlags: string[];
   config?: { hostPath: string; containerPath: string };
   credentials?: string;
+  hermesSeed?: { hostPath: string; containerPath: string };
   promptsDir?: string;
   outputDir?: string;
   workspace: string;
@@ -348,6 +349,13 @@ export function spawnWorker(opts: WorkerOptions): ChildProcess {
   // Mount credentials file to fixed container path
   if (opts.credentials) {
     args.push('-v', `${opts.credentials}:/app/credentials/google-sa-key.json:ro`);
+  }
+
+  // Mount the Hermes credential seed (e.g. ~/.hermes for Nous OAuth) read-only.
+  // The executor copies it into a per-run writable HERMES_HOME, so the
+  // OAuth-refresh patch can rewrite its own copy without touching the host dir.
+  if (opts.hermesSeed) {
+    args.push('-v', `${opts.hermesSeed.hostPath}:${opts.hermesSeed.containerPath}:ro`);
   }
 
   // Environment
