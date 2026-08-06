@@ -385,7 +385,7 @@ def _run_hermes(args: argparse.Namespace, prompt: str) -> int:
         # Anything inside the target repo is untrusted from a pentest perspective.
         # Belt-and-braces: env var (honored by hermes-agent bootstrap) plus the
         # `skip_context_files` constructor kwarg confirmed against hermes-agent
-        # 0.14.0's AIAgent signature.
+        # 0.19.0's AIAgent signature.
         os.environ.setdefault("HERMES_IGNORE_RULES", "1")
         kwargs.setdefault("skip_context_files", True)
     if args.model:
@@ -506,7 +506,7 @@ def _run_hermes(args: argparse.Namespace, prompt: str) -> int:
 def _extract_tool_start(cb_args: tuple[Any, ...], cb_kwargs: dict[str, Any]) -> tuple[str, Any, str | None]:
     """Extract (name, input, id) from a `tool_start_callback` invocation.
 
-    Confirmed Hermes 0.14.0 signature (verified against run_agent.py):
+    Confirmed Hermes 0.19.0 signature (verified against run_agent.py):
         tool_start_callback(tc.id, name, args)
     so positional args are `(id, name, input)`.
     """
@@ -519,7 +519,7 @@ def _extract_tool_start(cb_args: tuple[Any, ...], cb_kwargs: dict[str, Any]) -> 
 def _extract_tool_complete(cb_args: tuple[Any, ...], cb_kwargs: dict[str, Any]) -> tuple[str | None, Any, str | None, bool | None]:
     """Extract (name, content, id, success) from a `tool_complete_callback` invocation.
 
-    Confirmed Hermes 0.14.0 signature:
+    Confirmed Hermes 0.19.0 signature:
         tool_complete_callback(tool_call.id, function_name, function_args, function_result)
     so positional args are `(id, name, input, result)`.
     """

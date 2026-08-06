@@ -290,7 +290,7 @@ export class HermesAgentExecutor implements AgentExecutor {
 
     // If no base config.yaml is present and the operator gave us provider/model
     // via env (e.g. inside the Docker worker container), synthesize a minimal
-    // config.yaml on the fly. Hermes 0.14.0 requires a config.yaml to resolve
+    // config.yaml on the fly. Hermes 0.19.0 requires a config.yaml to resolve
     // the `custom` / aliased provider names; the `base_url` kwarg alone is not
     // enough. This keeps the CLI launch path env-only.
     if (!copiedFromBase) {

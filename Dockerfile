@@ -123,7 +123,7 @@ RUN chmod +x /app/entrypoint.sh
 # the `COPY --from=builder /app/apps/worker /app/apps/worker` step above
 # includes it regardless of the build flag.
 ARG WITH_HERMES=0
-ARG HERMES_AGENT_VERSION=0.14.0
+ARG HERMES_AGENT_VERSION=0.19.0
 RUN if [ "$WITH_HERMES" = "1" ]; then \
       set -eux; \
       apk add --no-cache py3.12-pip; \
