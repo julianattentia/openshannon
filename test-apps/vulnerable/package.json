@@ -1,0 +1,14 @@
+{
+  "name": "shannon-perf-vulnerable",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Deliberately-vulnerable fixture web app for Shannon deterministic perf tests. ZERO runtime dependencies (Node built-ins only).",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node app.js",
+    "selfcheck": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
