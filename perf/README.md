@@ -32,12 +32,33 @@ node --test perf/test/
 | target | kind | status |
 |--------|------|--------|
 | `vulnerable` | hermetic Node app, zero deps | **implemented** |
-| `crapi` | docker-compose | planned — not wired |
+| `crapi` | docker-compose (OWASP crAPI, port 8888) | **implemented** |
 | `juice-shop` | docker-compose | planned — not wired |
 
 Each target defines its `expectations` (per-class indicators) and how to boot.
 The runner refuses loudly for targets that are declared but not implemented, so
 a broken call can never produce a false PASS.
+
+## Model/provider selection
+
+The scan step routes Shannon's Hermes executor to a specific model:
+
+```bash
+# local OpenAI-compatible (llama.cpp / vLLM / LM Studio):
+node perf/run.mjs --target vulnerable \
+  --provider custom --model Qwen3.6-27B-Q4_K_M.gguf \
+  --base-url http://host.docker.internal:8001/v1
+
+# cloud OpenRouter (uses OPENROUTER_API_KEY from ~/.hermes/.../.env):
+node perf/run.mjs --target crapi \
+  --provider openrouter --model deepseek/deepseek-v4-flash-0731 \
+  --base-url https://openrouter.ai/api/v1
+```
+
+The runner waits for the workflow to complete (polling for the final
+`comprehensive_security_assessment_report.md`, up to `SHANNON_PERF_WAIT_MS`
+default 40 min) before asserting, so a hung workflow fails loudly instead of
+asserting against an empty/stale output dir.
 
 ## The fixture (`test-apps/vulnerable`)
 

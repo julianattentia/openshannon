@@ -255,7 +255,12 @@ async function main() {
   const { base, teardown } = await bootTarget(target, port, { host: appHost });
   const appBase =
     args.appUrl ||
-    (target.kind === 'compose' ? base : containerMode ? `http://host.docker.internal:${port}` : base);
+    (containerMode
+      ? `http://host.docker.internal:${target.kind === 'compose' ? target.port : port}`
+      : base);
+  // `base` is always a host-local URL (used for the host-side health probe and
+  // dry-run fetch). The worker container reaches the target via the separate
+  // `appBase` (host.docker.internal in container mode).
   const child = null; // hermetic-app lifecycle is owned by bootTarget's teardown
   let activeTeardown = teardown;
   try {
