@@ -263,8 +263,10 @@ async function main() {
     // The deliverables are copied to the output dir by the worker at workflow
     // end, so poll for them before asserting — otherwise we assert against an
     // empty/stale dir and report a bogus verdict. Timeout at WAIT_MS so a hung
-    // workflow fails loudly instead of asserting garbage.
-    const WAIT_MS = 20 * 60_000; // up to 20 min (model + agents + report)
+    // workflow fails loudly instead of asserting garbage. Configurable via
+    // SHANNON_PERF_WAIT_MS (ms) — local models are far slower than cloud ones.
+    const envWait = Number(process.env.SHANNON_PERF_WAIT_MS);
+    const WAIT_MS = Number.isFinite(envWait) && envWait > 0 ? envWait : 40 * 60_000; // default 40 min
     const DELIVERABLE_SENTINEL = 'comprehensive_security_assessment_report.md';
     console.log(`\n[3.5/4] waiting for workflow to finish (polling ${outDir} for ${DELIVERABLE_SENTINEL}, up to ${Math.round(WAIT_MS / 60_000)}m)...`);
     const waitStart = Date.now();
