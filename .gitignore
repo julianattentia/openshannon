@@ -7,3 +7,5 @@ repos/
 .turbo/
 .DS_Store
 .venv-hermes/
+# Cloned OWASP/crAPI fixture (large vendor repo, fetched ad-hoc; not part of our source)
+test-apps/crapi/

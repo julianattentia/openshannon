@@ -156,15 +156,54 @@ async function stageGitRepo(src, targetDir) {
   run('git', ['commit', '-qm', 'fixture seed'], { cwd: targetDir });
 }
 
-// Boot the app as an async child (non-blocking).
-function spawnApp(target, port, opts = {}) {
+// Boot the app as a child process (hermetic-app) OR a docker-compose stack
+// (compose). Returns a handle with a `teardown()` and the resolved base URL.
+async function bootTarget(target, port, opts = {}) {
   const host = opts.host || '127.0.0.1';
+  if (target.kind === 'compose') {
+    const composeFile = path.join(target.composeDir, target.composeFile);
+    const composeArgs = ['compose', '-f', composeFile, 'up', '-d'];
+    const env = { ...process.env, ...(target.env || {}) };
+    // Use --compatibility for older compose / non-swarm deploy blocks on this
+    // target's compose file (it ships without deploy sections in minimal mode,
+    // but upstream uses `--compatibility` per its README).
+    run('docker', ['compose', 'version'], { allowFailure: true });
+    const up = spawnSync('docker', [...composeArgs, '--remove-orphans'], {
+      encoding: 'utf8',
+      stdio: 'inherit',
+      env,
+      timeout: 300_000,
+    });
+    if (up.status !== 0) {
+      // Retry once with --compatibility (upstream README requirement)
+      const compat = spawnSync('docker', [...composeArgs, '--compatibility', '--remove-orphans'], {
+        encoding: 'utf8',
+        stdio: 'inherit',
+        env,
+        timeout: 300_000,
+      });
+      if (compat.status !== 0) throw new Error('crAPI compose up failed');
+    }
+    const base = `http://${host}:${target.port}`;
+    return {
+      base,
+      teardown: () => {
+        spawnSync('docker', ['compose', '-f', composeFile, 'down', '-v', '--remove-orphans'], {
+          encoding: 'utf8',
+          stdio: 'ignore',
+          env,
+          timeout: 180_000,
+        });
+      },
+    };
+  }
+  // hermetic-app (default): spawn a local Node child.
   const base = `http://127.0.0.1:${port}`;
   const child = spawn(process.execPath, [path.join(target.appSrc, target.entry)], {
     env: { ...process.env, PORT: String(port), APP_HOST: host, BASE_URL: base },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  return { child, base };
+  return { base, teardown: () => child.kill() };
 }
 
 // ---------------------------------------------------------------------------
@@ -202,23 +241,29 @@ async function main() {
   // host.docker.internal URL. Dry-run stays loopback-only.
   const containerMode = !args.dryRun;
   const appHost = containerMode ? '0.0.0.0' : '127.0.0.1';
-  const appBase =
-    args.appUrl || (containerMode ? `http://host.docker.internal:${port}` : `http://127.0.0.1:${port}`);
 
   // ---- Stage + boot ------------------------------------------------------
-  const stagedDir = args.stage ? path.join(tmpdir(), `shannon-perf-repo-${ws}`) : target.appSrc;
+  const srcDir = target.sourceDir || target.appSrc;
+  const stagedDir = args.stage ? path.join(tmpdir(), `shannon-perf-repo-${ws}`) : srcDir;
   if (args.stage) {
-    console.log(`\n[1/4] staging git checkout of ${target.appSrc} -> ${stagedDir}`);
-    await stageGitRepo(target.appSrc, stagedDir);
+    console.log(`\n[1/4] staging git checkout of ${srcDir} -> ${stagedDir}`);
+    await stageGitRepo(srcDir, stagedDir);
   }
-  console.log(`\n[2/4] booting ${target.name} app on ${appHost}:${port} (container-mode: ${containerMode})`);
-  const { child, base } = spawnApp(target, port, { host: appHost });
+  console.log(`\n[2/4] booting ${target.name} app (kind=${target.kind}, container-mode: ${containerMode})`);
+  // bootTarget resolves its own base URL: for hermetic-app it uses the free
+  // port; for compose it uses target.port (e.g. crAPI nginx on 8888).
+  const { base, teardown } = await bootTarget(target, port, { host: appHost });
+  const appBase =
+    args.appUrl ||
+    (target.kind === 'compose' ? base : containerMode ? `http://host.docker.internal:${port}` : base);
+  const child = null; // hermetic-app lifecycle is owned by bootTarget's teardown
+  let activeTeardown = teardown;
   try {
-    await waitFor(async () => (await fetch(`${base}${target.healthPath}`)).ok, 10_000, 'app health');
+    await waitFor(async () => (await fetch(`${base}${target.healthPath}`)).ok, 60_000, 'app health');
 
     if (args.dryRun) {
       console.log('dry-run: running fixture self-check...');
-      const sc = run('node', ['--test'], { cwd: target.appSrc, allowFailure: true });
+      const sc = run('node', ['--test'], { cwd: srcDir, allowFailure: true });
       const allPass = sc.stdout.includes('# fail 0');
       console.log(sc.stdout.split('\n').filter((l) => /(^#|ok |not ok)/.test(l)).join('\n'));
       console.log(allPass ? '\nFIXTURE SELF-CHECK: PASS' : `\nFIXTURE SELF-CHECK: FAIL (exit ${sc.status})`);
@@ -301,12 +346,12 @@ async function main() {
     }
     console.log(`\nVerdict: ${report.pass ? 'ALL PLANTED VULNS FOUND' : `${failed} CLASS(ES) NOT FOUND`}`);
     console.log(`Total: ${Math.round((Date.now() - started) / 1000)}s`);
-    if (!args.keepApp) child.kill();
+    if (!args.keepApp && activeTeardown) activeTeardown();
     process.exit(report.pass ? 0 : 1);
   } finally {
-    if (!args.keepApp) {
+    if (!args.keepApp && activeTeardown) {
       try {
-        child.kill();
+        activeTeardown();
       } catch {
         /* already gone */
       }
