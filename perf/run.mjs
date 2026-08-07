@@ -231,7 +231,7 @@ async function main() {
       console.log(
         '\nSKIP: no reachable Docker daemon in this environment, so a live scan cannot run here.\n' +
           'To run the real scan on a machine with Docker + provider credentials:\n\n' +
-          `  ${SHANNON} start -u ${appBase} -r ${stagedDir} --no-exploit --pipeline-testing -w ${ws} -o ${outDir}` +
+          `  ${SHANNON} start -u ${appBase} -r ${stagedDir} --no-exploit -w ${ws} -o ${outDir}` +
           (args.only ? ` --only ${args.only}` : '') +
           '\n\nThen re-run this harness there; it will assert the deliverables automatically.',
       );
@@ -239,7 +239,7 @@ async function main() {
     }
     const scanArgs = [
       'start', '-u', appBase, '-r', stagedDir,
-      '--no-exploit', '--pipeline-testing', '-w', ws, '-o', outDir,
+      '--no-exploit', '-w', ws, '-o', outDir,
     ];
     if (args.only) scanArgs.push('--only', args.only);
     // Thread the resolved Hermes model target into the scan environment so the
@@ -252,11 +252,36 @@ async function main() {
     };
     const before = Date.now();
     const scan = spawnSync(SHANNON, scanArgs, { encoding: 'utf8', stdio: 'inherit', env: scanEnv });
-    const scanMs = Date.now() - before;
     if (scan.status !== 0) {
       console.error(`\nShannon scan failed (exit ${scan.status}). Check workspace ${ws}.`);
       process.exit(scan.status ?? 1);
     }
+
+    // ---- Wait for completion --------------------------------------------
+    // `shannon start` returns as soon as the workflow has STARTED, not when it
+    // finishes (it spawns the worker and prints the Monitor line, then exits).
+    // The deliverables are copied to the output dir by the worker at workflow
+    // end, so poll for them before asserting — otherwise we assert against an
+    // empty/stale dir and report a bogus verdict. Timeout at WAIT_MS so a hung
+    // workflow fails loudly instead of asserting garbage.
+    const WAIT_MS = 20 * 60_000; // up to 20 min (model + agents + report)
+    const DELIVERABLE_SENTINEL = 'comprehensive_security_assessment_report.md';
+    console.log(`\n[3.5/4] waiting for workflow to finish (polling ${outDir} for ${DELIVERABLE_SENTINEL}, up to ${Math.round(WAIT_MS / 60_000)}m)...`);
+    const waitStart = Date.now();
+    for (;;) {
+      try {
+        await fs.access(path.join(outDir, DELIVERABLE_SENTINEL));
+        break;
+      } catch {
+        /* sentinel not present yet — keep polling */
+      }
+      if (Date.now() - waitStart > WAIT_MS) {
+        console.error(`\nTIMEOUT: workflow did not produce ${DELIVERABLE_SENTINEL} within ${Math.round(WAIT_MS / 60_000)}m. Check the Temporal web UI / workspace ${ws}.`);
+        process.exit(2);
+      }
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+    const scanMs = Date.now() - before;
 
     // ---- Assert ----------------------------------------------------------
     console.log(`\n[4/4] asserting deliverables in ${outDir} (scan took ${Math.round(scanMs / 1000)}s)`);
