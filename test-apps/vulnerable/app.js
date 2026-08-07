@@ -25,6 +25,10 @@ const { URL } = require('node:url');
 const crypto = require('node:crypto');
 
 const PORT = Number(process.env.PORT || 8787);
+// Bind address. Default loopback-only. The perf harness uses 0.0.0.0 (host
+// gateway) so a Shannon worker container can reach the app — only on an
+// isolated test box.
+const APP_HOST = process.env.APP_HOST || '127.0.0.1';
 // Base URL the SSRF route uses for its internal proof-of-impact target. The
 // self-check passes the listener's real origin here so it works on any port.
 const BASE = process.env.BASE_URL || `http://127.0.0.1:${PORT}`;
@@ -277,9 +281,10 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-  // Critical: bind loopback only.
-  process.stdout.write(`shannon-perf-vulnerable listening on 127.0.0.1:${PORT} (BASE=${BASE})\n`);
+server.listen(PORT, APP_HOST, () => {
+  // Critical: bind loopback only unless the operator explicitly opts into a
+  // broader bind for container reachability.
+  process.stdout.write(`shannon-perf-vulnerable listening on ${APP_HOST}:${PORT} (BASE=${BASE})\n`);
 });
 
 server.on('error', (err) => {

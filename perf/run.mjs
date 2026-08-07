@@ -44,6 +44,9 @@ function parseArgs(argv) {
     appUrl: null,
     keepApp: false,
     stage: true,
+    provider: null,
+    model: null,
+    baseUrl: null,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -52,6 +55,9 @@ function parseArgs(argv) {
     else if (a === '--workspace' || a === '-w') args.workspace = argv[++i];
     else if (a === '--only') args.only = argv[++i];
     else if (a === '--app-url') args.appUrl = argv[++i];
+    else if (a === '--provider') args.provider = argv[++i];
+    else if (a === '--model') args.model = argv[++i];
+    else if (a === '--base-url') args.baseUrl = argv[++i];
     else if (a === '--dry-run') args.dryRun = true;
     else if (a === '--no-stage') args.stage = false;
     else if (a === '--keep-app') args.keepApp = true;
@@ -151,10 +157,11 @@ async function stageGitRepo(src, targetDir) {
 }
 
 // Boot the app as an async child (non-blocking).
-function spawnApp(target, port) {
+function spawnApp(target, port, opts = {}) {
+  const host = opts.host || '127.0.0.1';
   const base = `http://127.0.0.1:${port}`;
   const child = spawn(process.execPath, [path.join(target.appSrc, target.entry)], {
-    env: { ...process.env, PORT: String(port), BASE_URL: base },
+    env: { ...process.env, PORT: String(port), APP_HOST: host, BASE_URL: base },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   return { child, base };
@@ -190,7 +197,13 @@ async function main() {
   await fs.mkdir(outDir, { recursive: true });
 
   const port = await freePort();
-  const appBase = args.appUrl || `http://127.0.0.1:${port}`;
+  // Container mode (a real scan): the Shannon worker runs in Docker, so it must
+  // reach both the LLM and the target via host-gateway → 0.0.0.0 bind + a
+  // host.docker.internal URL. Dry-run stays loopback-only.
+  const containerMode = !args.dryRun;
+  const appHost = containerMode ? '0.0.0.0' : '127.0.0.1';
+  const appBase =
+    args.appUrl || (containerMode ? `http://host.docker.internal:${port}` : `http://127.0.0.1:${port}`);
 
   // ---- Stage + boot ------------------------------------------------------
   const stagedDir = args.stage ? path.join(tmpdir(), `shannon-perf-repo-${ws}`) : target.appSrc;
@@ -198,8 +211,8 @@ async function main() {
     console.log(`\n[1/4] staging git checkout of ${target.appSrc} -> ${stagedDir}`);
     await stageGitRepo(target.appSrc, stagedDir);
   }
-  console.log(`\n[2/4] booting ${target.name} app on 127.0.0.1:${port}`);
-  const { child, base } = spawnApp(target, port);
+  console.log(`\n[2/4] booting ${target.name} app on ${appHost}:${port} (container-mode: ${containerMode})`);
+  const { child, base } = spawnApp(target, port, { host: appHost });
   try {
     await waitFor(async () => (await fetch(`${base}${target.healthPath}`)).ok, 10_000, 'app health');
 
@@ -229,8 +242,16 @@ async function main() {
       '--no-exploit', '--pipeline-testing', '-w', ws, '-o', outDir,
     ];
     if (args.only) scanArgs.push('--only', args.only);
+    // Thread the resolved Hermes model target into the scan environment so the
+    // worker's synthesized config uses the local Qwen server.
+    const scanEnv = {
+      ...process.env,
+      ...(args.provider && { SHANNON_HERMES_PROVIDER: args.provider }),
+      ...(args.model && { SHANNON_HERMES_MODEL: args.model }),
+      ...(args.baseUrl && { SHANNON_HERMES_BASE_URL: args.baseUrl }),
+    };
     const before = Date.now();
-    const scan = spawnSync(SHANNON, scanArgs, { encoding: 'utf8', stdio: 'inherit' });
+    const scan = spawnSync(SHANNON, scanArgs, { encoding: 'utf8', stdio: 'inherit', env: scanEnv });
     const scanMs = Date.now() - before;
     if (scan.status !== 0) {
       console.error(`\nShannon scan failed (exit ${scan.status}). Check workspace ${ws}.`);
