@@ -1,0 +1,4 @@
+# DISABLED BY DESIGN — do not uncomment automatically.
+# Sparse nightly profile; one target and one local-model slot per run.
+# 30 3 * * * cd /home/attentia/agent-workspaces/shannon-runner && /usr/bin/env node runner/run-once.mjs --target /home/attentia/openshannon/test-apps/crapi --profile scheduled --timeout-seconds 1800 >> run-logs/scheduled.log 2>&1
+# Enable only after human review of model availability, target teardown, and the PR branch.
